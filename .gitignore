@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Face photos, trained model and attendance sheets are personal data - never commit them.
+dataset/*
+models/*
+records/*
+!dataset/.gitkeep
+!models/.gitkeep
+!records/.gitkeep
