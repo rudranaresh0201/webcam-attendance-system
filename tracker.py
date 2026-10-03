@@ -1,8 +1,7 @@
 """Follow each face from frame to frame by bounding-box overlap (IoU).
 
-Per-face state (who it has been recognised as, for how many frames in a row,
-any liveness challenge in progress) lives on the Track, so two people in view
-never share a counter.
+Per-face state (who it has been recognised as, for how many frames in a row)
+lives on the Track, so two people in view never share a counter.
 """
 import config
 
@@ -23,8 +22,6 @@ class Track:
         self.misses = 0
         self.label = None           # student currently being recognised on this track
         self.streak = 0             # consecutive frames recognised as self.label
-        self.challenge = None       # liveness.Challenge in progress
-        self.blocked_until = 0.0    # after a failed liveness check
 
     def observe(self, match):
         """Update the consecutive-frame counter with this frame's recognition result."""

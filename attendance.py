@@ -1,11 +1,6 @@
-"""Live recognition: mark recognized students present, everyone else absent on quit.
-
-    python attendance.py                  # backend from config.py
-    python attendance.py --backend dnn    # YuNet + SFace, with head-turn liveness check
-"""
+"""Live recognition: mark recognized students present, everyone else absent on quit."""
 import json
 import sys
-import time
 from datetime import datetime
 
 import cv2
@@ -13,8 +8,7 @@ import pandas as pd
 
 import config
 import utils
-from engines import create_engine
-from liveness import Challenge, yaw_ratio
+from engines import FaceEngine
 from tracker import Tracker
 
 WINDOW = "Attendance - press q to finish"
@@ -22,11 +16,9 @@ COLUMNS = ["roll", "name", "status", "time"]
 
 
 def load_model(engine):
-    model_dir = config.model_dir(engine.name)
-    labels_path = model_dir / "labels.json"
-    if not engine.load(model_dir) or not labels_path.exists():
-        sys.exit(f"No trained {engine.name} model found. Run: python train.py --backend {engine.name}")
-    with open(labels_path) as f:
+    if not engine.load() or not config.LABELS_PATH.exists():
+        sys.exit("No trained model found. Run train.py first.")
+    with open(config.LABELS_PATH) as f:
         return {int(i): s for i, s in json.load(f).items()}
 
 
@@ -67,11 +59,10 @@ def save_attendance(path, labels, present):
 class AttendanceSession:
     """Per-frame attendance logic, kept separate from the camera loop so it can be tested."""
 
-    def __init__(self, engine, labels, path, liveness=False):
+    def __init__(self, engine, labels, path):
         self.engine = engine
         self.labels = labels
         self.path = path
-        self.liveness = liveness
         self.present = load_present(path)
         self.tracker = Tracker()
 
@@ -81,61 +72,25 @@ class AttendanceSession:
         save_attendance(self.path, self.labels, self.present)
         print(f"Present: {student['roll']} {student['name']} at {now}")
 
-    def process(self, frame, now=None):
+    def process(self, frame):
         """Detect, track and recognise every face in the frame. Returns the annotated frame."""
-        now = time.monotonic() if now is None else now
         view = frame.copy()
         for track in self.tracker.update(self.engine.detect(frame)):
             match = self.engine.predict(self.engine.describe(frame, track.face))
-            self._update_track(view, track, match, now)
+            track.observe(match)
+            box = track.face.box
+            student = self.labels.get(track.label)
+            if student is None:
+                utils.draw_label(view, box, f"Unknown ({match.score:.0f})", utils.RED)
+                continue
+            if track.confirmed and student["roll"] not in self.present:
+                self.mark_present(student)
+            if student["roll"] in self.present:
+                utils.draw_label(view, box, f"{student['name']} - Marked", utils.GREEN)
+            else:
+                utils.draw_label(view, box, f"{student['name']} ({match.score:.0f})", utils.YELLOW)
         utils.draw_hud(view, f"Present: {self.count_present()}/{len(self.labels)}")
         return view
-
-    def _update_track(self, view, track, match, now):
-        box = track.face.box
-        score = f"{match.score:.2f}" if self.engine.higher_is_better else f"{match.score:.0f}"
-
-        if track.challenge:
-            self._update_challenge(view, track, match, now)
-            return
-        if now < track.blocked_until:
-            utils.draw_label(view, box, "Liveness failed", utils.RED)
-            return
-
-        track.observe(match)
-        student = self.labels.get(track.label)
-        if student is None:
-            utils.draw_label(view, box, f"Unknown ({score})", utils.RED)
-        elif student["roll"] in self.present:
-            utils.draw_label(view, box, f"{student['name']} - Marked", utils.GREEN)
-        elif not track.confirmed:
-            utils.draw_label(view, box, f"{student['name']} ({score})", utils.YELLOW)
-        elif not self.liveness:
-            self.mark_present(student)
-            utils.draw_label(view, box, f"{student['name']} - Marked", utils.GREEN)
-        elif abs(yaw_ratio(track.face.landmarks)) < config.LIVENESS_FRONTAL:
-            track.challenge = Challenge(now)
-            utils.draw_label(view, box, track.challenge.prompt, utils.YELLOW)
-        else:
-            # the head turn is measured from a frontal pose, so wait for one
-            utils.draw_label(view, box, f"{student['name']} - look at the camera", utils.YELLOW)
-
-    def _update_challenge(self, view, track, match, now):
-        box = track.face.box
-        student = self.labels[track.label]
-        identity_ok = match.ok and match.label == track.label
-        result = track.challenge.update(yaw_ratio(track.face.landmarks), identity_ok, now)
-        if result == "passed":
-            track.challenge = None
-            self.mark_present(student)
-            utils.draw_label(view, box, f"{student['name']} - Marked", utils.GREEN)
-        elif result == "failed":
-            track.challenge = None
-            track.label, track.streak = None, 0
-            track.blocked_until = now + config.LIVENESS_COOLDOWN
-            utils.draw_label(view, box, "Liveness failed", utils.RED)
-        else:
-            utils.draw_label(view, box, f"{student['name']}: {track.challenge.prompt}", utils.YELLOW)
 
     def count_present(self):
         return sum(1 for s in self.labels.values() if s["roll"] in self.present)
@@ -145,21 +100,9 @@ class AttendanceSession:
 
 
 def main():
-    parser = utils.backend_parser("Take attendance from the webcam.")
-    parser.add_argument("--no-liveness", action="store_true", help="skip the head-turn liveness check (dnn)")
-    args = parser.parse_args()
-    try:
-        engine = create_engine(args.backend)
-    except RuntimeError as e:
-        sys.exit(str(e))
+    engine = FaceEngine()
     labels = load_model(engine)
-
-    liveness = config.LIVENESS and not args.no_liveness
-    if liveness and engine.name != "dnn":
-        print("Note: the liveness check needs facial landmarks and only runs with --backend dnn.")
-        liveness = False
-
-    session = AttendanceSession(engine, labels, csv_path_for_today(), liveness)
+    session = AttendanceSession(engine, labels, csv_path_for_today())
     cap = utils.open_camera()
     try:
         while True:

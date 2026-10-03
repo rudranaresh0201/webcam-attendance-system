@@ -1,10 +1,10 @@
-"""Face engines: detection, face description and recognition behind one interface.
+"""The image processing pipeline: detection, face normalisation and recognition.
 
-    classic  Haar cascade -> eye alignment -> illumination normalisation -> ellipse mask -> LBPH
-    dnn      YuNet detector (5 landmarks) -> SFace aligned crop -> 128-D embedding -> cosine
+    blur -> grayscale -> CLAHE -> Haar cascade -> crop (optional eye alignment)
+    -> illumination normalisation -> (optional ellipse mask) -> LBPH
 
-Every script goes through the same engine methods, so registration, training,
-evaluation and live attendance all see identically processed faces.
+Every script goes through the same FaceEngine methods, so registration,
+training, evaluation and live attendance all see identically processed faces.
 """
 import math
 from dataclasses import dataclass
@@ -17,16 +17,14 @@ import config
 
 @dataclass
 class Face:
-    box: tuple                      # (x, y, w, h)
-    landmarks: np.ndarray = None    # dnn only, 5x2: eye, eye, nose tip, mouth corner, mouth corner
-    raw: np.ndarray = None          # dnn only, detector row needed by SFace alignCrop
+    box: tuple      # (x, y, w, h)
 
 
 @dataclass
 class Match:
     label: int      # id of the closest registered student
-    score: float    # classic: LBPH distance (lower = closer). dnn: cosine similarity (higher = closer)
-    ok: bool        # score passes the backend's threshold
+    score: float    # LBPH distance to that student (lower = closer)
+    ok: bool        # distance is within LBPH_THRESHOLD
 
 
 def tan_triggs(chip, gamma=0.2, sigma0=1.0, sigma1=2.0, alpha=0.1, tau=10.0):
@@ -54,10 +52,7 @@ def lbp_image(gray):
     return codes
 
 
-class ClassicEngine:
-    name = "classic"
-    higher_is_better = False
-
+class FaceEngine:
     def __init__(self, align=None, illumination=None, mask=None, threshold=None):
         self.align = config.ALIGN_EYES if align is None else align
         self.illumination = config.ILLUMINATION if illumination is None else illumination
@@ -76,7 +71,7 @@ class ClassicEngine:
 
     # -- detection ---------------------------------------------------------
     def gray(self, frame):
-        """Gaussian blur + grayscale, cached so detect() and chip() share one pass per frame."""
+        """Gaussian blur + grayscale, cached so detect() and describe() share one pass per frame."""
         if self._gray_cache[0] is not frame:
             blurred = cv2.GaussianBlur(frame, config.BLUR_KERNEL, 0)
             self._gray_cache = (frame, cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY))
@@ -148,7 +143,7 @@ class ClassicEngine:
         return cv2.resize(gray[y:y + h, x:x + w], config.FACE_SIZE)
 
     def describe(self, frame, face):
-        """What the recognizer consumes: for LBPH, the normalised 200x200 face chip."""
+        """What the recognizer consumes: the normalised 200x200 face chip."""
         return self.normalise(self.raw_chip(frame, face))
 
     # -- recognition -------------------------------------------------------
@@ -162,85 +157,13 @@ class ClassicEngine:
         label, distance = self._recognizer.predict(descriptor)
         return Match(label, distance, distance <= self.threshold)
 
-    def save(self, directory):
-        self._recognizer.write(str(directory / "lbph_model.yml"))
+    def save(self):
+        config.MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        self._recognizer.write(str(config.MODEL_PATH))
 
-    def load(self, directory):
-        path = directory / "lbph_model.yml"
-        if not path.exists():
+    def load(self):
+        if not config.MODEL_PATH.exists():
             return False
         self._recognizer = cv2.face.LBPHFaceRecognizer_create()
-        self._recognizer.read(str(path))
+        self._recognizer.read(str(config.MODEL_PATH))
         return True
-
-
-class DnnEngine:
-    name = "dnn"
-    higher_is_better = True
-
-    def __init__(self, threshold=None):
-        for path in (config.YUNET_PATH, config.SFACE_PATH):
-            if not path.exists():
-                raise RuntimeError(f"Missing {path.name}. Run: python download_models.py")
-        self.threshold = config.SFACE_THRESHOLD if threshold is None else threshold
-        self._detector = cv2.FaceDetectorYN.create(
-            str(config.YUNET_PATH), "", (320, 320), config.YUNET_SCORE_THRESHOLD)
-        self._recognizer = cv2.FaceRecognizerSF.create(str(config.SFACE_PATH), "")
-        self._labels = None
-        self._templates = None
-
-    def detect(self, frame):
-        h, w = frame.shape[:2]
-        self._detector.setInputSize((w, h))
-        _, rows = self._detector.detect(frame)
-        faces = []
-        for row in (rows if rows is not None else []):
-            x, y = max(int(row[0]), 0), max(int(row[1]), 0)
-            bw, bh = min(int(row[2]), w - x), min(int(row[3]), h - y)
-            if bw < config.MIN_FACE_SIZE[0] or bh < config.MIN_FACE_SIZE[1]:
-                continue
-            faces.append(Face((x, y, bw, bh), row[4:14].reshape(5, 2).copy(), row))
-        return faces
-
-    def aligned(self, frame, face):
-        """112x112 colour crop warped so the 5 landmarks sit on SFace's reference positions."""
-        return self._recognizer.alignCrop(frame, face.raw)
-
-    def describe(self, frame, face):
-        """What the recognizer consumes: for SFace, the unit-length 128-D embedding."""
-        feature = self._recognizer.feature(self.aligned(frame, face)).flatten()
-        return feature / np.linalg.norm(feature)
-
-    def train(self, descriptors, label_ids):
-        """One template per student: the mean of their embeddings, scaled back to unit length."""
-        embeddings = np.array(descriptors)
-        label_ids = np.array(label_ids)
-        self._labels = np.unique(label_ids)
-        templates = np.array([embeddings[label_ids == label].mean(axis=0) for label in self._labels])
-        self._templates = templates / np.linalg.norm(templates, axis=1, keepdims=True)
-
-    def predict(self, descriptor):
-        similarities = self._templates @ descriptor
-        best = int(np.argmax(similarities))
-        score = float(similarities[best])
-        return Match(int(self._labels[best]), score, score >= self.threshold)
-
-    def save(self, directory):
-        np.savez(directory / "sface_templates.npz", labels=self._labels, templates=self._templates)
-
-    def load(self, directory):
-        path = directory / "sface_templates.npz"
-        if not path.exists():
-            return False
-        data = np.load(path)
-        self._labels, self._templates = data["labels"], data["templates"]
-        return True
-
-
-def create_engine(backend=None, **kwargs):
-    backend = backend or config.BACKEND
-    if backend == "classic":
-        return ClassicEngine(**kwargs)
-    if backend == "dnn":
-        return DnnEngine(**kwargs)
-    raise ValueError(f"Unknown backend '{backend}'. Use one of {config.BACKENDS}.")

@@ -1,5 +1,4 @@
 """Shared helpers: camera, frame preparation, dataset layout, face quality, drawing."""
-import argparse
 import sys
 
 import cv2
@@ -8,14 +7,6 @@ import config
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".pgm"}
 GREEN, RED, YELLOW, WHITE = (0, 255, 0), (0, 0, 255), (0, 255, 255), (255, 255, 255)
-
-
-def backend_parser(description):
-    """Argument parser with the --backend option every script shares."""
-    parser = argparse.ArgumentParser(description=description)
-    parser.add_argument("--backend", choices=config.BACKENDS, default=config.BACKEND,
-                        help=f"face engine to use (default: {config.BACKEND})")
-    return parser
 
 
 def open_camera():
@@ -53,8 +44,8 @@ def largest_face(faces):
 
 def padded_crop(frame, box):
     """The face plus CROP_PADDING of context on every side, clipped to the frame.
-    This is what gets stored in dataset/, so either backend can re-detect and
-    normalise the face in its own way at training time."""
+    This is what gets stored in dataset/: training re-detects and normalises the
+    face from it, so normalisation settings can change without re-registering."""
     x, y, w, h = box
     pad = int(config.CROP_PADDING * max(w, h))
     return frame[max(y - pad, 0):y + h + pad, max(x - pad, 0):x + w + pad]

@@ -28,15 +28,10 @@ def main():
         )
 
     import utils
-    from engines import create_engine
+    from engines import FaceEngine
 
-    engines = {"classic": create_engine("classic")}
-    print("OK: classic backend (Haar cascade + LBPH)")
-    try:
-        engines["dnn"] = create_engine("dnn")
-        print("OK: dnn backend (YuNet + SFace)")
-    except RuntimeError as e:
-        print(f"--: dnn backend not available. {e}")
+    engine = FaceEngine()
+    print("OK: Haar cascade and LBPH recognizer available")
 
     if "--no-camera" in sys.argv:
         return
@@ -54,9 +49,7 @@ def main():
     if not ok:
         sys.exit("FAIL: camera opened but returned no frame.")
     frame = utils.prepare_frame(frame)
-    print(f"OK: camera frame {frame.shape[1]}x{frame.shape[0]}")
-    for name, engine in engines.items():
-        print(f"    faces detected by {name}: {len(engine.detect(frame))}")
+    print(f"OK: camera frame {frame.shape[1]}x{frame.shape[0]}, faces detected: {len(engine.detect(frame))}")
 
 
 if __name__ == "__main__":

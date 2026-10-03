@@ -1,7 +1,6 @@
 """Measure recognition accuracy and suggest a threshold.
 
     python evaluate.py                           # on the registered students in dataset/
-    python evaluate.py --backend dnn
     python evaluate.py --data path/to/lfw --min-images 20 --max-people 10 --max-images 30
 
 --data takes any public dataset laid out as one folder per person.
@@ -12,6 +11,7 @@ Two experiments:
   impostors       leave one person out of training entirely, then show their
                   faces. Every one of them should come back as Unknown.
 """
+import argparse
 import sys
 from pathlib import Path
 
@@ -19,7 +19,7 @@ import numpy as np
 
 import config
 import utils
-from engines import create_engine
+from engines import FaceEngine
 from train import load_dataset
 
 MAX_FALSE_ACCEPT = 0.01     # the suggested threshold lets at most this share of strangers through
@@ -54,12 +54,11 @@ def run_experiments(engine, descriptors, label_ids, folds):
     return np.array(genuine_scores), np.array(genuine_correct), np.array(impostor_scores)
 
 
-def rates(engine, threshold, genuine, correct, impostor):
-    """(false accept, missed, wrong student) rates at a threshold."""
-    accept = (lambda s: s >= threshold) if engine.higher_is_better else (lambda s: s <= threshold)
-    false_accept = accept(impostor).mean()              # stranger accepted as a student
-    missed = 1 - (accept(genuine) & correct).mean()     # student not credited
-    wrong = (accept(genuine) & ~correct).mean()         # student accepted as someone else
+def rates(threshold, genuine, correct, impostor):
+    """(false accept, missed, wrong student) rates at an LBPH distance threshold."""
+    false_accept = (impostor <= threshold).mean()               # stranger accepted as a student
+    missed = 1 - ((genuine <= threshold) & correct).mean()      # student not credited
+    wrong = ((genuine <= threshold) & ~correct).mean()          # student accepted as someone else
     return false_accept, missed, wrong
 
 
@@ -71,18 +70,15 @@ def evaluate(engine, dirs, max_images, folds):
 
     genuine, correct, impostor = run_experiments(engine, descriptors, label_ids, folds)
 
-    if engine.higher_is_better:
-        grid, name, fmt = np.arange(0.0, 1.0, 0.005), "SFACE_THRESHOLD", "{:.3f}"
-    else:
-        grid, name, fmt = np.arange(1.0, max(genuine.max(), impostor.max()) + 1), "LBPH_THRESHOLD", "{:.0f}"
-    table = np.array([rates(engine, t, genuine, correct, impostor) for t in grid])
+    grid = np.arange(1.0, max(genuine.max(), impostor.max()) + 1)
+    table = np.array([rates(t, genuine, correct, impostor) for t in grid])
     equal_error = grid[np.argmin(np.abs(table[:, 0] - table[:, 1]))]
     safe = grid[table[:, 0] <= MAX_FALSE_ACCEPT]
     # most lenient threshold that still keeps strangers out
-    suggested = (safe.min() if engine.higher_is_better else safe.max()) if len(safe) else None
+    suggested = safe.max() if len(safe) else None
 
     skipped = sum(s["skipped"] for s in labels.values())
-    print(f"\n[{engine.name}] {len(labels)} people, {len(descriptors)} face images"
+    print(f"\n{len(labels)} people, {len(descriptors)} face images"
           + (f" ({skipped} skipped, no face found)" if skipped else ""))
     print(f"Identification accuracy (nearest match is the right person): {correct.mean():.1%}")
     print(f"{'threshold':<28}{'value':>8}{'false accept':>14}{'missed':>9}{'wrong student':>15}")
@@ -90,16 +86,16 @@ def evaluate(engine, dirs, max_images, folds):
     if suggested is not None:
         rows.append((f"false accept <= {MAX_FALSE_ACCEPT:.0%}", suggested))
     for title, threshold in rows:
-        fa, missed, wrong = rates(engine, threshold, genuine, correct, impostor)
-        print(f"{title:<28}{fmt.format(threshold):>8}{fa:>14.1%}{missed:>9.1%}{wrong:>15.1%}")
+        fa, missed, wrong = rates(threshold, genuine, correct, impostor)
+        print(f"{title:<28}{threshold:>8.0f}{fa:>14.1%}{missed:>9.1%}{wrong:>15.1%}")
     if suggested is not None:
-        print(f"Suggested: {name} = {fmt.format(suggested)}")
+        print(f"Suggested: LBPH_THRESHOLD = {suggested:.0f}")
     else:
         print("No threshold keeps strangers out on this data.")
 
 
 def main():
-    parser = utils.backend_parser("Evaluate recognition accuracy.")
+    parser = argparse.ArgumentParser(description="Evaluate recognition accuracy.")
     parser.add_argument("--data", type=Path, metavar="DIR",
                         help="dataset with one folder per person (default: the registered students)")
     parser.add_argument("--min-images", type=int, default=config.MIN_IMAGES_TO_TRAIN,
@@ -117,11 +113,7 @@ def main():
         dirs = utils.student_dirs()
     dirs = [d for d in dirs if len(utils.image_files(d)) >= args.min_images][:args.max_people]
 
-    try:
-        engine = create_engine(args.backend)
-    except RuntimeError as e:
-        sys.exit(str(e))
-    evaluate(engine, dirs, args.max_images, args.folds)
+    evaluate(FaceEngine(), dirs, args.max_images, args.folds)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
     python register.py                          # capture from the webcam
     python register.py --from-folder photos/    # import existing photos instead
 """
+import argparse
 import re
 import shutil
 import sys
@@ -12,7 +13,7 @@ import cv2
 
 import config
 import utils
-from engines import create_engine
+from engines import FaceEngine
 
 WINDOW = "Register - press q to abort"
 
@@ -97,7 +98,7 @@ def import_folder(engine, folder, out_dir):
 
 
 def main():
-    parser = utils.backend_parser("Register a student's face.")
+    parser = argparse.ArgumentParser(description="Register a student's face.")
     parser.add_argument("--roll", help="roll number (asked for if omitted)")
     parser.add_argument("--name", help="student name (asked for if omitted)")
     parser.add_argument("--from-folder", type=Path, metavar="DIR",
@@ -107,10 +108,7 @@ def main():
 
     if args.from_folder and not args.from_folder.is_dir():
         sys.exit(f"{args.from_folder} is not a folder.")
-    try:
-        engine = create_engine(args.backend)
-    except RuntimeError as e:
-        sys.exit(str(e))
+    engine = FaceEngine()
 
     roll, name = ask_student(args.roll, args.name)
     out_dir = prepare_dir(roll, name, args.overwrite)

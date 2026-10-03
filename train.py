@@ -1,8 +1,4 @@
-"""Train a recognizer on everything in dataset/.
-
-    python train.py                  # backend from config.py
-    python train.py --backend dnn
-"""
+"""Train the LBPH recognizer on everything in dataset/."""
 import json
 import sys
 
@@ -10,7 +6,7 @@ import cv2
 
 import config
 import utils
-from engines import create_engine
+from engines import FaceEngine
 
 
 def load_dataset(engine, dirs=None, max_images=None):
@@ -51,23 +47,16 @@ def check_dataset(labels):
 
 
 def main():
-    args = utils.backend_parser("Train the face recognizer.").parse_args()
-    try:
-        engine = create_engine(args.backend)
-    except RuntimeError as e:
-        sys.exit(str(e))
-
+    engine = FaceEngine()
     descriptors, label_ids, labels = load_dataset(engine)
     check_dataset(labels)
     engine.train(descriptors, label_ids)
 
-    model_dir = config.model_dir(engine.name)
-    model_dir.mkdir(parents=True, exist_ok=True)
-    engine.save(model_dir)
-    with open(model_dir / "labels.json", "w") as f:
+    engine.save()
+    with open(config.LABELS_PATH, "w") as f:
         json.dump({i: {"roll": s["roll"], "name": s["name"]} for i, s in labels.items()}, f, indent=2)
 
-    print(f"[{engine.name}] trained on {len(labels)} student(s), {len(descriptors)} images:")
+    print(f"Trained on {len(labels)} student(s), {len(descriptors)} images:")
     for s in labels.values():
         note = f", {s['skipped']} skipped (no face found)" if s["skipped"] else ""
         print(f"  {s['roll']}  {s['name']}  ({s['images']} images{note})")
