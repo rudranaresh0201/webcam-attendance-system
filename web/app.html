@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FaceRoll – live</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='5' fill='%23222'/><circle cx='12' cy='10' r='4' fill='white'/><path d='M5 20c1.5-4 12.5-4 14 0' fill='white'/></svg>">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1><a href="./">FaceRoll</a></h1>
+    <p>Attendance from your webcam with classic image processing. <b>Everything runs in this browser:</b> your camera and face photos never leave this device.</p>
+  </div>
+  <div class="session">
+    <span id="sessionText">Not recording</span>
+    <button id="btnStart" class="primary" disabled>Start attendance</button>
+    <button id="btnStop" class="danger" hidden>Finish and save</button>
+  </div>
+</header>
+
+<nav class="tabs">
+  <a data-tab="live" class="on">Live</a>
+  <a data-tab="register">Enrol</a>
+  <a data-tab="students">Students</a>
+  <a data-tab="records">Records</a>
+  <a data-tab="settings">Settings</a>
+</nav>
+
+<div class="boot" id="boot">
+  <div class="boot-card">
+    <h2>Starting FaceRoll</h2>
+    <p id="bootText">Loading Python…</p>
+    <div class="bar"><em id="bootBar"></em></div>
+    <p class="muted small">The same Python and OpenCV code as the desktop version, compiled to run in your browser. The first visit downloads about 15 MB; after that it is cached.</p>
+  </div>
+</div>
+
+<main class="stage">
+  <div class="toast" id="toast"></div>
+
+  <!-- LIVE -->
+  <section id="tab-live" class="face on">
+    <div class="live">
+      <div class="card">
+        <p class="say" id="say">Waiting for the camera…</p>
+        <div class="video-wrap">
+          <canvas id="screen" width="640" height="480"></canvas>
+          <div class="cam-off" id="camOff"><p>FaceRoll needs your camera.</p><button id="btnCam" class="primary">Turn on camera</button><p class="muted small" id="camErr"></p></div>
+        </div>
+        <div class="sees">
+          <span class="label">What the computer sees:</span>
+          <div class="seg" id="viewSeg">
+            <button data-view="camera" class="on">Camera</button>
+            <button data-view="contrast">Contrast fixed</button>
+            <button data-view="texture">Texture (LBP)</button>
+            <button data-view="votes">Detector votes</button>
+          </div>
+          <span class="muted small" id="fps"></span>
+        </div>
+        <p class="explain-view" id="viewNote"></p>
+      </div>
+      <div class="side">
+        <div class="card">
+          <div class="big-count"><b id="kPresent">0</b><span>of <b id="kTotal">0</b> present</span></div>
+          <label class="check small-check"><input type="checkbox" id="showNames"> Show names on this screen</label>
+          <p class="welcome" id="welcome" hidden></p>
+          <ul class="roster" id="roster"></ul>
+          <p class="muted small" id="privNote">Names are hidden so a projected screen doesn't show who is absent. The full list is under Records.</p>
+        </div>
+        <div class="card" id="feedCard"><h3>Arrivals</h3><ul class="feed" id="feed"></ul></div>
+      </div>
+    </div>
+
+    <div class="card how">
+      <div class="how-head"><h2>How it decided</h2><button class="ghost" id="btnFlat">Lay the layers flat</button></div>
+      <div class="how-grid">
+        <div class="stack-wrap">
+          <div class="stack" id="stack">
+            <div class="layer" style="--i:0"><canvas class="img" width="120" height="120"></canvas><label>1. Face, cropped and evened out</label></div>
+            <div class="layer" style="--i:1"><canvas class="img" width="120" height="120"></canvas><label>2. Texture code of every pixel</label></div>
+            <div class="layer" style="--i:2"><canvas class="img" width="120" height="120"></canvas><label>3. Where it differs from the match</label></div>
+            <div class="layer" style="--i:3"><canvas class="img" width="120" height="120"></canvas><label>4. Closest enrolled student</label></div>
+          </div>
+          <ol class="steps" id="steps">
+            <li data-l="0"><b>Crop and even out.</b> The face is cut out, resized to 200×200 and its contrast evened out, so a dim room and a bright room look alike.</li>
+            <li data-l="1"><b>Describe the texture.</b> Each pixel is compared with its 8 neighbours: brighter or darker? Those 8 answers make a code for spots, edges and corners.</li>
+            <li data-l="2"><b>Compare.</b> The codes are counted in each square of an 8×8 grid and compared with every enrolled photo. Brighter squares differ more; eyes and brows count most.</li>
+            <li data-l="3"><b>Decide.</b> It must be close to one student <i>and</i> clearly closer to them than to anyone else, including a hidden crowd of 192 strangers, in 5 of the last 8 frames.</li>
+          </ol>
+        </div>
+        <div id="faceTable" class="faces"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ENROL -->
+  <section id="tab-register" class="face">
+    <div class="two">
+      <div class="card">
+        <h2>Enrol a student</h2>
+        <p class="muted">Takes 30 photos from the webcam in about 10 seconds. Blurry, dark or washed-out frames are skipped. You'll be asked to turn your head a little so it learns a few angles.</p>
+        <label>Roll number<input id="rRoll" autocomplete="off" spellcheck="false"></label>
+        <label>Name<input id="rName" autocomplete="off" spellcheck="false"></label>
+        <button id="btnReg" class="primary wide" disabled>Start</button>
+        <p class="muted small" style="margin-top:12px">Photos are stored only in this browser. Clearing the site's data removes them.</p>
+      </div>
+      <div class="card">
+        <div class="reg-status">
+          <div class="ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15.5" class="track"/><circle cx="18" cy="18" r="15.5" class="prog" id="ringProg"/></svg><b id="ringTxt">0/30</b></div>
+          <div><p class="hint" id="regHint">Type a roll number and name, then press Start. Watch the Live camera while it captures.</p>
+            <button id="btnRegCancel" class="ghost" hidden>Stop</button></div>
+        </div>
+        <canvas id="regScreen" width="640" height="480" class="reg-screen"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <!-- STUDENTS -->
+  <section id="tab-students" class="face">
+    <div class="row-head"><h2>Students</h2><span class="muted small">Stored only in this browser.</span></div>
+    <div class="cards" id="studentCards"></div>
+  </section>
+
+  <!-- RECORDS -->
+  <section id="tab-records" class="face">
+    <div class="row-head"><h2>Records</h2><span class="muted small">One sheet per day, kept in this browser</span></div>
+    <div id="recordList"></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="tab-settings" class="face">
+    <div class="two">
+      <div class="card form">
+        <h2>Settings</h2>
+        <label>Face finder
+          <select id="sDETECTOR"><option value="consensus">Two detectors must agree (recommended)</option><option value="haar">Haar only</option><option value="lbp">LBP only (fastest)</option></select></label>
+        <label>How close a match must be <output id="oDIST_THRESHOLD"></output><input type="range" id="sDIST_THRESHOLD" min="0.2" max="0.7" step="0.01"></label>
+        <label>How clearly it must beat the runner-up <output id="oRATIO_THRESHOLD"></output><input type="range" id="sRATIO_THRESHOLD" min="0.6" max="1" step="0.01"></label>
+        <label>Frames needed (out of the last 8) <output id="oCONFIRM_FRAMES"></output><input type="range" id="sCONFIRM_FRAMES" min="1" max="8" step="1"></label>
+        <label class="check"><input type="checkbox" id="sLIVENESS"> Ask for a blink (stops someone holding up a photo)</label>
+        <button id="btnSave" class="primary">Save</button>
+        <button id="btnReset" class="ghost">Reset to defaults</button>
+      </div>
+      <div class="card">
+        <h2>About</h2>
+        <p class="muted">This page runs FaceRoll's Python code (OpenCV, NumPy) in your browser through WebAssembly. It is the same pipeline as the desktop app: Haar + LBP face detection, uniform LBP texture histograms with learned weights, and a runner-up test against other students and a hidden crowd.</p>
+        <p class="muted"><a href="./">How it works and the results</a> · <a href="https://github.com/rudranaresh0201/webcam-attendance-system">Code on GitHub</a></p>
+        <h3 style="margin-top:22px">Erase everything</h3>
+        <p class="muted small">Removes all students, photos and records stored by this page in this browser.</p>
+        <button id="btnWipe" class="danger">Erase all data</button>
+      </div>
+    </div>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

@@ -9,3 +9,5 @@ records/*
 !dataset/.gitkeep
 !models/.gitkeep
 !records/.gitkeep
+
+web/dist/
