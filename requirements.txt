@@ -1,5 +1,8 @@
-# contrib build is required: LBPH lives in cv2.face.
+# contrib build is required for the LBPH baseline (cv2.face).
 # Stay below 5.x - OpenCV 5 drops cv2.CascadeClassifier and the Haar XML files from the main package.
 opencv-contrib-python>=4.10,<5
 numpy
 pandas
+flask>=3.0          # web dashboard (app.py)
+matplotlib          # benchmark figures (benchmark.py)
+scikit-learn        # only to download LFW for benchmark.py

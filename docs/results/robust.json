@@ -1,0 +1,232 @@
+{
+  "thresholds": [
+    0.5,
+    0.88
+  ],
+  "rows": [
+    {
+      "occlusion": "none",
+      "trim": 0.0,
+      "mirror": false,
+      "strangers_accepted": 0.006457518731025043,
+      "students_missed": 0.5656692074238878
+    },
+    {
+      "occlusion": "none",
+      "trim": 0.0,
+      "mirror": true,
+      "strangers_accepted": 0.008526799738203208,
+      "students_missed": 0.5411794793882257
+    },
+    {
+      "occlusion": "none",
+      "trim": 0.1,
+      "mirror": false,
+      "strangers_accepted": 0.0039522496733559705,
+      "students_missed": 0.589499055272975
+    },
+    {
+      "occlusion": "none",
+      "trim": 0.1,
+      "mirror": true,
+      "strangers_accepted": 0.0050435476036860966,
+      "students_missed": 0.5230987475701805
+    },
+    {
+      "occlusion": "none",
+      "trim": 0.2,
+      "mirror": false,
+      "strangers_accepted": 0.0035016404177281467,
+      "students_missed": 0.5818668776767318
+    },
+    {
+      "occlusion": "none",
+      "trim": 0.2,
+      "mirror": true,
+      "strangers_accepted": 0.004555100943344091,
+      "students_missed": 0.5275004651832544
+    },
+    {
+      "occlusion": "none",
+      "trim": 0.3,
+      "mirror": false,
+      "strangers_accepted": 0.003934034233040444,
+      "students_missed": 0.6040436709968999
+    },
+    {
+      "occlusion": "none",
+      "trim": 0.3,
+      "mirror": true,
+      "strangers_accepted": 0.005052759764413108,
+      "students_missed": 0.570289403290945
+    },
+    {
+      "occlusion": "eye bar (sunglasses)",
+      "trim": 0.0,
+      "mirror": false,
+      "strangers_accepted": 0.0,
+      "students_missed": 0.9248803930942052
+    },
+    {
+      "occlusion": "eye bar (sunglasses)",
+      "trim": 0.0,
+      "mirror": true,
+      "strangers_accepted": 0.0,
+      "students_missed": 0.9251026153164273
+    },
+    {
+      "occlusion": "eye bar (sunglasses)",
+      "trim": 0.1,
+      "mirror": false,
+      "strangers_accepted": 0.0025628006100931943,
+      "students_missed": 0.7452474545760083
+    },
+    {
+      "occlusion": "eye bar (sunglasses)",
+      "trim": 0.1,
+      "mirror": true,
+      "strangers_accepted": 0.004066581560856658,
+      "students_missed": 0.7359185232467356
+    },
+    {
+      "occlusion": "eye bar (sunglasses)",
+      "trim": 0.2,
+      "mirror": false,
+      "strangers_accepted": 0.00528352124657438,
+      "students_missed": 0.6819258302332948
+    },
+    {
+      "occlusion": "eye bar (sunglasses)",
+      "trim": 0.2,
+      "mirror": true,
+      "strangers_accepted": 0.006967398087147323,
+      "students_missed": 0.6537511826581581
+    },
+    {
+      "occlusion": "eye bar (sunglasses)",
+      "trim": 0.3,
+      "mirror": false,
+      "strangers_accepted": 0.004526388097968312,
+      "students_missed": 0.6771117603748875
+    },
+    {
+      "occlusion": "eye bar (sunglasses)",
+      "trim": 0.3,
+      "mirror": true,
+      "strangers_accepted": 0.006334948015155218,
+      "students_missed": 0.6463241465123101
+    },
+    {
+      "occlusion": "lower face (mask)",
+      "trim": 0.0,
+      "mirror": false,
+      "strangers_accepted": 0.0,
+      "students_missed": 1.0
+    },
+    {
+      "occlusion": "lower face (mask)",
+      "trim": 0.0,
+      "mirror": true,
+      "strangers_accepted": 0.0,
+      "students_missed": 1.0
+    },
+    {
+      "occlusion": "lower face (mask)",
+      "trim": 0.1,
+      "mirror": false,
+      "strangers_accepted": 0.000538121453978379,
+      "students_missed": 0.8211227097519442
+    },
+    {
+      "occlusion": "lower face (mask)",
+      "trim": 0.1,
+      "mirror": true,
+      "strangers_accepted": 0.0007368555179400725,
+      "students_missed": 0.8135763680327684
+    },
+    {
+      "occlusion": "lower face (mask)",
+      "trim": 0.2,
+      "mirror": false,
+      "strangers_accepted": 0.006373437882924593,
+      "students_missed": 0.6520280523173678
+    },
+    {
+      "occlusion": "lower face (mask)",
+      "trim": 0.2,
+      "mirror": true,
+      "strangers_accepted": 0.00883052924948889,
+      "students_missed": 0.6207055107609158
+    },
+    {
+      "occlusion": "lower face (mask)",
+      "trim": 0.3,
+      "mirror": false,
+      "strangers_accepted": 0.005161672969543115,
+      "students_missed": 0.6006773096842808
+    },
+    {
+      "occlusion": "lower face (mask)",
+      "trim": 0.3,
+      "mirror": true,
+      "strangers_accepted": 0.007503183595083713,
+      "students_missed": 0.5494736415560939
+    },
+    {
+      "occlusion": "hand over cheek",
+      "trim": 0.0,
+      "mirror": false,
+      "strangers_accepted": 0.0015956990179783418,
+      "students_missed": 0.7671137235225931
+    },
+    {
+      "occlusion": "hand over cheek",
+      "trim": 0.0,
+      "mirror": true,
+      "strangers_accepted": 0.0021161944729258904,
+      "students_missed": 0.7575431268811296
+    },
+    {
+      "occlusion": "hand over cheek",
+      "trim": 0.1,
+      "mirror": false,
+      "strangers_accepted": 0.003856386231570097,
+      "students_missed": 0.6197770137464094
+    },
+    {
+      "occlusion": "hand over cheek",
+      "trim": 0.1,
+      "mirror": true,
+      "strangers_accepted": 0.004873336855287279,
+      "students_missed": 0.5903340897580248
+    },
+    {
+      "occlusion": "hand over cheek",
+      "trim": 0.2,
+      "mirror": false,
+      "strangers_accepted": 0.0035480643827552226,
+      "students_missed": 0.6149677463655924
+    },
+    {
+      "occlusion": "hand over cheek",
+      "trim": 0.2,
+      "mirror": true,
+      "strangers_accepted": 0.004169293866123383,
+      "students_missed": 0.559442979375163
+    },
+    {
+      "occlusion": "hand over cheek",
+      "trim": 0.3,
+      "mirror": false,
+      "strangers_accepted": 0.004053346080955782,
+      "students_missed": 0.5962763303055582
+    },
+    {
+      "occlusion": "hand over cheek",
+      "trim": 0.3,
+      "mirror": true,
+      "strangers_accepted": 0.004348917512508277,
+      "students_missed": 0.5648200084270962
+    }
+  ]
+}

@@ -1,6 +1,10 @@
-"""Live recognition: mark recognized students present, everyone else absent on quit."""
-import json
+"""Live recognition: mark recognised students present, everyone else absent on quit.
+
+    python attendance.py          # OpenCV window, press q to finish
+    python app.py                 # the same session inside the web dashboard
+"""
 import sys
+import threading
 from datetime import datetime
 
 import cv2
@@ -9,6 +13,7 @@ import pandas as pd
 import config
 import utils
 from engines import FaceEngine
+from recognizer import load_labels
 from tracker import Tracker
 
 WINDOW = "Attendance - press q to finish"
@@ -16,10 +21,10 @@ COLUMNS = ["roll", "name", "status", "time"]
 
 
 def load_model(engine):
-    if not engine.load() or not config.LABELS_PATH.exists():
-        sys.exit("No trained model found. Run train.py first.")
-    with open(config.LABELS_PATH) as f:
-        return {int(i): s for i, s in json.load(f).items()}
+    labels = load_labels()
+    if not engine.load() or not labels:
+        sys.exit("No trained model found (or settings changed). Run train.py first.")
+    return labels
 
 
 def csv_path_for_today():
@@ -41,7 +46,6 @@ def load_present(path):
 def save_attendance(path, labels, present):
     """Rewrite the whole CSV: one row per student, keyed by roll, so re-runs never duplicate."""
     students = {s["roll"]: s["name"] for s in labels.values()}
-    # keep anyone marked earlier today even if they are no longer in the model
     students.update({roll: p["name"] for roll, p in present.items() if roll not in students})
     rows = [
         {
@@ -57,7 +61,8 @@ def save_attendance(path, labels, present):
 
 
 class AttendanceSession:
-    """Per-frame attendance logic, kept separate from the camera loop so it can be tested."""
+    """Per-frame attendance logic, kept separate from the camera loop so the CLI,
+    the web app and the tests can all drive it."""
 
     def __init__(self, engine, labels, path):
         self.engine = engine
@@ -65,38 +70,72 @@ class AttendanceSession:
         self.path = path
         self.present = load_present(path)
         self.tracker = Tracker()
+        self.events = []            # (time, roll, name) for the UI feed
+        self.unknown_tracks = set()
+        self._lock = threading.Lock()
 
     def mark_present(self, student):
         now = datetime.now().strftime("%H:%M:%S")
-        self.present[student["roll"]] = {"name": student["name"], "time": now}
-        save_attendance(self.path, self.labels, self.present)
+        with self._lock:
+            self.present[student["roll"]] = {"name": student["name"], "time": now}
+            self.events.append({"time": now, "roll": student["roll"], "name": student["name"]})
+            save_attendance(self.path, self.labels, self.present)
         print(f"Present: {student['roll']} {student['name']} at {now}")
 
-    def process(self, frame):
-        """Detect, track and recognise every face in the frame. Returns the annotated frame."""
-        view = frame.copy()
+    def step(self, frame):
+        """Detect, track, recognise. Returns a list of per-face result dicts."""
+        results = []
+        gray = self.engine.gray(frame)
         for track in self.tracker.update(self.engine.detect(frame)):
-            match = self.engine.predict(self.engine.describe(frame, track.face))
+            chip = self.engine.describe(frame, track.face)
+            match = self.engine.predict(chip)
             track.observe(match)
-            box = track.face.box
-            student = self.labels.get(track.label)
-            if student is None:
-                utils.draw_label(view, box, f"Unknown ({match.score:.0f})", utils.RED)
-                continue
-            if track.confirmed and student["roll"] not in self.present:
-                self.mark_present(student)
-            if student["roll"] in self.present:
-                utils.draw_label(view, box, f"{student['name']} - Marked", utils.GREEN)
+            if config.LIVENESS:
+                track.observe_eyes(self.engine.detector.count_eyes(gray, track.face.box))
+            student = self.labels.get(track.label)      # leader of the last-8-frames vote
+            state = "unknown"
+            if student is not None:
+                if track.confirmed and track.live and student["roll"] not in self.present:
+                    self.mark_present(student)
+                if student["roll"] in self.present:
+                    state = "marked"
+                elif track.confirmed and not track.live:
+                    state = "blink"
+                else:
+                    state = "verifying"
+            elif track.age >= config.CONFIRM_FRAMES:
+                self.unknown_tracks.add(track.id)
+            results.append({
+                "track": track, "chip": chip, "match": match, "student": student, "state": state,
+                "box": track.face.box, "sources": track.face.sources,
+            })
+        return results
+
+    def draw(self, frame, results):
+        view = frame.copy()
+        for r in results:
+            m, s = r["match"], r["student"]
+            if r["state"] == "unknown":
+                utils.draw_label(view, r["box"], f"Unknown ({m.score:.2f})", utils.RED)
+            elif r["state"] == "marked":
+                utils.draw_label(view, r["box"], f"{s['name']} - Marked", utils.GREEN)
+            elif r["state"] == "blink":
+                utils.draw_label(view, r["box"], f"{s['name']} - blink to confirm", utils.YELLOW)
             else:
-                utils.draw_label(view, box, f"{student['name']} ({match.score:.0f})", utils.YELLOW)
+                utils.draw_label(view, r["box"], f"{s['name']} {r['track'].streak}/{config.CONFIRM_FRAMES}",
+                                 utils.YELLOW)
         utils.draw_hud(view, f"Present: {self.count_present()}/{len(self.labels)}")
         return view
+
+    def process(self, frame):
+        return self.draw(frame, self.step(frame))
 
     def count_present(self):
         return sum(1 for s in self.labels.values() if s["roll"] in self.present)
 
     def finish(self):
-        save_attendance(self.path, self.labels, self.present)
+        with self._lock:
+            save_attendance(self.path, self.labels, self.present)
 
 
 def main():

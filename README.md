@@ -1,116 +1,133 @@
-# Face Detection Attendance System
+# FaceRoll: webcam attendance with Haar and LBP
 
-Webcam attendance: each student registers their face once, then the system
-recognises faces live and writes present/absent to a CSV for the day.
-Unregistered faces show as **Unknown** and are never logged.
+Each student enrols their face once. The system then recognises faces live and
+writes present/absent to a CSV for the day. Unregistered people show as
+**Unknown** and are never logged.
 
-Built with classical image processing only (OpenCV): no neural networks.
+It uses **classical image processing only**: Haar and LBP cascades, uniform LBP
+histograms and χ² matching, with no neural network. It runs in real time
+(about 20 fps) on a laptop CPU.
 
-The original spec is in [plan.md](plan.md). Where this README and the plan
-differ, the README describes what the code actually does.
+This is stage 2 of Case Study 9 (Image Processing, VJTI). Stage 1 surveyed the
+methods and found the weakness that drives this stage: with the textbook LBPH
+pipeline, **91% of strangers were accepted** as a registered student.
 
-## Setup (once)
+| | stage 1 (OpenCV LBPH) | **this system** |
+|---|---|---|
+| false boxes per frame (LFW mosaics) | 0.31 | **0.10** |
+| LFW rank-1, 62 people | 56.6% | **67.3%** |
+| students missed when ≤ 1% of strangers get in | 88.1% | **66.5%**, or **51.4%** with 2-frame fusion |
+| Yale B, light 50–77° off-axis | 48.1% | **97.0%** (Tan–Triggs + LTP) |
+| photo spoofing | accepted | optional blink check |
 
-Needs Python 3.10+ and a webcam.
+Full numbers: [docs/RESULTS.md](docs/RESULTS.md). The theory and what is new:
+[docs/RESEARCH.md](docs/RESEARCH.md). How it was built:
+[docs/WALKTHROUGH.md](docs/WALKTHROUGH.md).
 
-**Windows:** double-click `setup.bat`, or run it from a terminal.
+![Pipeline stages](docs/figures/pipeline_stages.png)
 
-**Manual / macOS / Linux:**
+## Setup
 
-```
+Python 3.10–3.12 and a webcam.
+
+```bash
 python -m venv .venv
-.venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python check_setup.py             # checks packages and the webcam
+python check_setup.py                # packages, cascades and the webcam
 ```
 
-If `check_setup.py` says OpenCV has no `cv2.face`, you have plain
-`opencv-python` installed. This project needs `opencv-contrib-python` 4.x
-(OpenCV 5 removed the Haar cascade from the main package). Use the venv.
+On Windows, `setup.bat` does all of this.
 
-## Use
+Use `opencv-contrib-python` 4.x, not plain `opencv-python`: the baseline LBPH
+recogniser lives in `cv2.face`, and OpenCV 5 drops the Haar cascades.
 
+## Run
+
+```bash
+python app.py                        # web dashboard -> http://127.0.0.1:8000
 ```
-python register.py        # roll number + name, then look at the camera (30 images)
-python train.py           # after registering everyone
-python attendance.py      # press q to finish; absentees are written on quit
+
+| channel | what it does |
+|---|---|
+| **Live** | A plain sentence says what the system sees and why ("closest is X, but not close enough: 0.58 vs 0.50"). **What the computer sees** switches the video to the pipeline's own images: contrast-fixed, LBP texture, and each detector's raw votes. **How it decided** shows the layers in 3D (face → texture codes → difference map → closest student) with meters against each limit. |
+| **Enrol** | Name and roll number, then 30 guided webcam captures (blurred, dark or over-bright frames are refused), or import ≥ 10 photos. The model retrains automatically. |
+| **Students** | Enrolled students; click a card to flip it and see the captures. |
+| **Records** | One register per day, downloadable as CSV. |
+| **How well it works** | The benchmark results; click a chart to flip it for a plain explanation. |
+| **Settings** | Detector, lighting fix, LTP, limits, frames, blink check. *Tune for this class* measures the right limits on your own students. |
+
+
+The original command-line tools still work and share the same pipeline:
+
+```bash
+python register.py                   # or: --from-folder photos/ --roll 12 --name "A B"
+python train.py
+python attendance.py                 # OpenCV window, q to finish
+python evaluate.py                   # accuracy + suggested thresholds on your students
 ```
 
-Output: `records/attendance_YYYY-MM-DD.csv` with `roll, name, status, time`.
-Running again on the same day keeps earlier Present marks and adds new ones.
-
-Register at least two people. With one student the recognizer has nobody else
-to confuse them with, and only the threshold keeps strangers out.
+Output: `records/attendance_YYYY-MM-DD.csv` with `roll, name, status, time`. A
+re-run on the same day keeps earlier Present marks.
 
 ## Pipeline
 
-| Stage | Implementation |
-|---|---|
-| Image acquisition | `cv2.VideoCapture`, resize to 640 px wide, mirror |
-| Noise reduction | Gaussian blur 3x3 |
-| Grayscale conversion | `cv2.cvtColor(..., COLOR_BGR2GRAY)` |
-| Contrast enhancement | CLAHE (adaptive histogram equalisation) |
-| Face detection | Haar cascade, `detectMultiScale` |
-| Geometric normalisation | crop to 200x200; optional eye alignment (`ALIGN_EYES`, off) |
-| Photometric normalisation | CLAHE on the face chip; optional Tan-Triggs and elliptical mask (off) |
-| Feature extraction | LBP histograms over an 8x8 grid |
-| Classification | LBPH nearest neighbour, distance <= `LBPH_THRESHOLD` |
-| Output | CSV attendance with timestamp |
-
-False-detection reduction:
-
-- `MIN_NEIGHBORS` and a minimum face size, so spurious and background boxes are dropped
-- a distance threshold, so strangers are Unknown instead of the nearest student
-- each face is tracked across frames (box overlap) and must be recognised as
-  the same student for `CONFIRM_FRAMES` consecutive frames
-- registration rejects blurry (variance of Laplacian), too dark and too bright captures
-
-## Evaluating and tuning
-
-```
-python evaluate.py                    # on your registered students
-python evaluate.py --data path/to/dataset --min-images 20 --max-people 10 --max-images 30
-```
-
-`--data` accepts any public dataset laid out as one folder per person (LFW is
-already in that layout). It reports identification accuracy, how many
-strangers get accepted, how many students get missed, and suggests a
-threshold. **Set `LBPH_THRESHOLD` in `config.py` from a run on your own
-registered students** - the default is a starting point.
-
-First numbers, LFW (funneled), 10 people x 30 images, default settings:
-
-| Identification accuracy | Strangers accepted at `LBPH_THRESHOLD = 70` | At 50 |
+| stage | implementation | file |
 |---|---|---|
-| 76.6% | 91.2% | 0.7%, but 82% of genuine faces are then rejected |
+| acquisition | `VideoCapture`, 640 px wide, mirrored | `utils.py` |
+| noise | Gaussian 3×3 | `engines.py` |
+| grayscale | Y = 0.299R + 0.587G + 0.114B | `engines.py` |
+| contrast | CLAHE, clip 2.0, 8×8 tiles | `engines.py` |
+| **detection** | **consensus**: Haar ∧ LBP cascade, or one of them plus an eye pair, or a Haar box with ≥ 20 neighbours | `detector.py` |
+| normalisation | 200×200 chip; CLAHE, or Tan–Triggs (γ, DoG, equalisation) | `engines.py` |
+| **features** | our NumPy LBP: uniform (59 bins), radii 1 and 2, 8×8 grid; optional LTP | `lbp.py` |
+| **matching** | χ² with **learned per-cell weights**, minimum over each person's templates | `lbp.py`, `recognizer.py` |
+| **open-set decision** | d₁ ≤ 0.50 **and ratio test** d₁/d₂ ≤ 0.84, where the runner-up can be another student **or a hidden crowd of 192 non-students** | `recognizer.py` |
+| **occlusion** | mirror enrolment + trimmed χ² (ignore the worst 20% of cells): masked faces go from never recognised to recognised | `recognizer.py`, `lbp.py` |
+| temporal | IoU tracker; credited when accepted in **5 of the last 8 frames**; optional **blink** | `tracker.py`, `attendance.py` |
+| output | CSV per day | `attendance.py` |
 
-LFW is unconstrained news photos, much harder than one webcam in one room, so
-expect better on your own registrations. The threshold still has to be
-measured there.
+OpenCV's LBPH is kept as a baseline (`RECOGNIZER = "lbph"` in `config.py`).
+
+## Reproducing the evaluation
+
+```bash
+python benchmark.py --lfw path/to/lfw_funneled --yale path/to/CroppedYale
+python tests/smoke_test.py --lfw path/to/lfw_funneled             # pipeline, no camera
+python tests/e2e_test.py --lfw path/to/lfw_funneled --chrome /usr/bin/google-chrome   # app + browser (pip install playwright)
+```
+
+LFW can be fetched with `sklearn.datasets.fetch_lfw_people(data_home=...)`. The
+benchmark writes `docs/results/*.json`, `docs/figures/*.png`, and the learned cell
+weights in `assets/`.
 
 ## Files
 
-| File | Purpose |
+| file | purpose |
 |---|---|
+| `app.py`, `static/` | web dashboard (Flask + plain HTML/CSS/JS, no build step) |
 | `config.py` | every tunable parameter |
-| `engines.py` | the pipeline: `detect`, `describe`, `train`, `predict` |
-| `register.py` | capture from webcam, or `--from-folder` to import photos |
-| `train.py` | build the recognizer from `dataset/` |
-| `attendance.py` | live loop, CSV writing |
-| `tracker.py` | follows faces between frames |
-| `evaluate.py` | accuracy + threshold suggestion |
-| `utils.py` | camera, quality checks, drawing |
-| `check_setup.py`, `setup.bat` | environment |
+| `engines.py` | the pipeline shared by every entry point |
+| `detector.py` | Haar / LBP / union / consensus detection, eye checks |
+| `lbp.py` | LBP, uniform mapping, LTP, spatial histograms, χ², weight learning |
+| `recognizer.py` | open-set LBP matcher and the OpenCV LBPH baseline |
+| `tracker.py` | IoU tracking, confirmation streak, blink state machine |
+| `attendance.py` | attendance session, CSV, CLI |
+| `register.py`, `train.py`, `evaluate.py` | CLI enrolment, training, calibration |
+| `benchmark.py` | all experiments and figures |
+| `cascades/` | OpenCV's LBP cascades (not in the pip wheel), BSD licence |
+| `assets/` | learned cell weights |
+| `docs/` | research notes, results, walkthrough, figures |
 
-`dataset/`, `models/` and `records/` are git-ignored: they hold face photos and
-attendance sheets. Share them privately if both of you need the same data.
+`dataset/`, `models/` and `records/` are git-ignored: they hold face photographs
+and attendance sheets.
 
-The `dnn-comparison` branch holds an earlier version with an extra neural-network
-backend. It is not part of the project; it is there only as a reference point.
+## Known limits
 
-## Not done yet
-
-- benchmark on two public datasets (`evaluate.py --data` is the hook)
-- threshold tuning on real registrations
-- pipeline-stage figures for the report (`engines.lbp_image` computes the LBP code image)
-- GUI
+* Frontal faces only: both cascades are frontal. A student must face the camera
+  at some point in the session.
+* Faces smaller than 80×80 px are ignored, so a large lecture hall needs a
+  higher-resolution camera.
+* The blink check stops printed photos but not a video replay.
+* On a projected screen, keep **Show names** off: the Live screen then shows only the count and "Welcome, <name>".
+* Students are missed more often when they look down or are seen in very different light from enrolment. Re-enrol in the room's usual light.

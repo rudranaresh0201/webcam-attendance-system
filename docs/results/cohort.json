@@ -1,0 +1,55 @@
+{
+  "dist_threshold": 0.5,
+  "ratio_threshold": 0.88,
+  "cohort_faces": 192,
+  "rows": [
+    {
+      "K": 1,
+      "cohort": false,
+      "strangers_accepted": 0.5550455543406309,
+      "students_missed": 0.04999999999999999
+    },
+    {
+      "K": 1,
+      "cohort": true,
+      "strangers_accepted": 0.0025821275191794343,
+      "students_missed": 0.5325000000000001
+    },
+    {
+      "K": 2,
+      "cohort": false,
+      "strangers_accepted": 0.22931508453486532,
+      "students_missed": 0.2072222222222222
+    },
+    {
+      "K": 2,
+      "cohort": true,
+      "strangers_accepted": 0.004561588728993031,
+      "students_missed": 0.6133333333333333
+    },
+    {
+      "K": 5,
+      "cohort": false,
+      "strangers_accepted": 0.07040873043663598,
+      "students_missed": 0.40801345755693585
+    },
+    {
+      "K": 5,
+      "cohort": true,
+      "strangers_accepted": 0.007358785438617105,
+      "students_missed": 0.5917826086956521
+    },
+    {
+      "K": 10,
+      "cohort": false,
+      "strangers_accepted": 0.03938086518774403,
+      "students_missed": 0.5063200413606701
+    },
+    {
+      "K": 10,
+      "cohort": true,
+      "strangers_accepted": 0.01050220914614286,
+      "students_missed": 0.5983940324896533
+    }
+  ]
+}

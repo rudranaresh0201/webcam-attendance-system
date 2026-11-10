@@ -1,5 +1,4 @@
 """Train the LBPH recognizer on everything in dataset/."""
-import json
 import sys
 
 import cv2
@@ -7,6 +6,7 @@ import cv2
 import config
 import utils
 from engines import FaceEngine
+from recognizer import save_labels
 
 
 def load_dataset(engine, dirs=None, max_images=None):
@@ -46,15 +46,20 @@ def check_dataset(labels):
         sys.exit(f"Each student needs at least {config.MIN_IMAGES_TO_TRAIN} usable images. Register them again.")
 
 
-def main():
-    engine = FaceEngine()
+def train_all(engine=None, quiet=False):
+    """Build the recognizer from dataset/ and save it. Returns the labels dict.
+    Raises SystemExit with a message when the dataset is unusable."""
+    engine = engine or FaceEngine()
     descriptors, label_ids, labels = load_dataset(engine)
     check_dataset(labels)
     engine.train(descriptors, label_ids)
-
     engine.save()
-    with open(config.LABELS_PATH, "w") as f:
-        json.dump({i: {"roll": s["roll"], "name": s["name"]} for i, s in labels.items()}, f, indent=2)
+    save_labels(labels)
+    return engine, descriptors, labels
+
+
+def main():
+    engine, descriptors, labels = train_all()
 
     print(f"Trained on {len(labels)} student(s), {len(descriptors)} images:")
     for s in labels.values():
