@@ -26,7 +26,7 @@ MAX_FALSE_ACCEPT = 0.01     # the suggested threshold lets at most this share of
 
 
 def run_experiments(engine, descriptors, label_ids, folds):
-    """Returns (genuine_scores, genuine_correct, impostor_scores) as arrays."""
+    """Returns a dict of genuine / impostor distances, ratios and correctness arrays."""
     label_ids = np.array(label_ids)
     index_in_person = np.zeros(len(label_ids), dtype=int)
     for label in np.unique(label_ids):
@@ -36,62 +36,68 @@ def run_experiments(engine, descriptors, label_ids, folds):
     def train_on(mask):
         engine.train([descriptors[i] for i in np.flatnonzero(mask)], label_ids[mask].tolist())
 
-    genuine_scores, genuine_correct = [], []
+    gd, gr, gc = [], [], []
     for fold in range(folds):
         test = index_in_person % folds == fold
         train_on(~test)
         for i in np.flatnonzero(test):
-            match = engine.predict(descriptors[i])
-            genuine_scores.append(match.score)
-            genuine_correct.append(match.label == label_ids[i])
+            m = engine.predict(descriptors[i])
+            gd.append(m.score)
+            gr.append(m.ratio)
+            gc.append(m.label == label_ids[i])
 
-    impostor_scores = []
+    idd, ir = [], []
     for label in np.unique(label_ids):
         held_out = label_ids == label
         train_on(~held_out)
-        impostor_scores.extend(engine.predict(descriptors[i]).score for i in np.flatnonzero(held_out))
+        for i in np.flatnonzero(held_out):
+            m = engine.predict(descriptors[i])
+            idd.append(m.score)
+            ir.append(m.ratio)
+    a = np.array
+    return dict(g_d=a(gd), g_r=a(gr), g_correct=a(gc, bool), i_d=a(idd), i_r=a(ir))
 
-    return np.array(genuine_scores), np.array(genuine_correct), np.array(impostor_scores)
 
-
-def rates(threshold, genuine, correct, impostor):
-    """(false accept, missed, wrong student) rates at an LBPH distance threshold."""
-    false_accept = (impostor <= threshold).mean()               # stranger accepted as a student
-    missed = 1 - ((genuine <= threshold) & correct).mean()      # student not credited
-    wrong = ((genuine <= threshold) & ~correct).mean()          # student accepted as someone else
-    return false_accept, missed, wrong
+def rates(s, t, r):
+    """(false accept, missed, wrong student) at distance threshold t and ratio threshold r."""
+    fa = ((s["i_d"] <= t) & (s["i_r"] <= r)).mean()
+    acc = (s["g_d"] <= t) & (s["g_r"] <= r)
+    return fa, 1 - (acc & s["g_correct"]).mean(), (acc & ~s["g_correct"]).mean()
 
 
 def evaluate(engine, dirs, max_images, folds):
+    from benchmark import frr_at_far
     descriptors, label_ids, labels = load_dataset(engine, dirs, max_images)
     people = [s for s in labels.values() if s["images"] >= folds]
-    if len(people) < 2 or len(people) < len(labels):
-        sys.exit(f"Need at least 2 people, each with {folds}+ usable face images.")
+    if len(people) < 3 or len(people) < len(labels):
+        sys.exit(f"Need at least 3 people, each with {folds}+ usable face images "
+                 "(the impostor test removes one person and still needs two to compare).")
 
-    genuine, correct, impostor = run_experiments(engine, descriptors, label_ids, folds)
-
-    grid = np.arange(1.0, max(genuine.max(), impostor.max()) + 1)
-    table = np.array([rates(t, genuine, correct, impostor) for t in grid])
-    equal_error = grid[np.argmin(np.abs(table[:, 0] - table[:, 1]))]
-    safe = grid[table[:, 0] <= MAX_FALSE_ACCEPT]
-    # most lenient threshold that still keeps strangers out
-    suggested = safe.max() if len(safe) else None
-
-    skipped = sum(s["skipped"] for s in labels.values())
+    s = run_experiments(engine, descriptors, label_ids, folds)
+    openset = engine.recognizer.kind == "openset"
+    skipped = sum(v["skipped"] for v in labels.values())
     print(f"\n{len(labels)} people, {len(descriptors)} face images"
           + (f" ({skipped} skipped, no face found)" if skipped else ""))
-    print(f"Identification accuracy (nearest match is the right person): {correct.mean():.1%}")
-    print(f"{'threshold':<28}{'value':>8}{'false accept':>14}{'missed':>9}{'wrong student':>15}")
-    rows = [("current (config.py)", engine.threshold), ("equal error rate", equal_error)]
-    if suggested is not None:
-        rows.append((f"false accept <= {MAX_FALSE_ACCEPT:.0%}", suggested))
-    for title, threshold in rows:
-        fa, missed, wrong = rates(threshold, genuine, correct, impostor)
-        print(f"{title:<28}{threshold:>8.0f}{fa:>14.1%}{missed:>9.1%}{wrong:>15.1%}")
-    if suggested is not None:
-        print(f"Suggested: LBPH_THRESHOLD = {suggested:.0f}")
-    else:
+    print(f"Identification accuracy (nearest match is the right person): {s['g_correct'].mean():.1%}")
+    print(f"{'rule':<34}{'dist':>7}{'ratio':>7}{'false accept':>14}{'missed':>9}{'wrong':>8}")
+    cur_r = engine.recognizer.ratio_threshold if openset else 9.0
+    rows = [("current (config.py)", engine.threshold, cur_r)]
+    best = frr_at_far(s, "distance+ratio" if openset else "distance", MAX_FALSE_ACCEPT)
+    if best[1] is not None:
+        rows.append((f"best with false accept <= {MAX_FALSE_ACCEPT:.0%}", *best[1]))
+    for title, t, r in rows:
+        fa, missed, wrong = rates(s, t, r)
+        print(f"{title:<34}{t:>7.3f}{min(r, 9):>7.2f}{fa:>14.1%}{missed:>9.1%}{wrong:>8.1%}")
+    if best[1] is None:
         print("No threshold keeps strangers out on this data.")
+        return None
+    t, r = best[1]
+    if openset:
+        print(f"Suggested: DIST_THRESHOLD = {t:.3f}, RATIO_THRESHOLD = {r:.2f}")
+    else:
+        print(f"Suggested: LBPH_THRESHOLD = {t:.0f}")
+    return {"accuracy": float(s["g_correct"].mean()), "dist": t, "ratio": r,
+            "far": float(rates(s, t, r)[0]), "frr": float(best[0])}
 
 
 def main():

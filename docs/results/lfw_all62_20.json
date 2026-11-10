@@ -1,0 +1,125 @@
+{
+  "people": 62,
+  "images": 1201,
+  "skipped": 39,
+  "variants": {
+    "uLBP(8,1)": {
+      "accuracy": 0.5253955037468776,
+      "frr@far1 distance": 0.8817651956702748,
+      "thresholds distance": [
+        0.3361078202724457,
+        9.0
+      ],
+      "wrong distance": 0.005828476269775187,
+      "frr@far1 ratio": 0.8268109908409659,
+      "thresholds ratio": [
+        9000000000.0,
+        0.875
+      ],
+      "wrong ratio": 0.0033305578684429643,
+      "frr@far1 distance+ratio": 0.8218151540383014,
+      "thresholds distance+ratio": [
+        0.42196262419223785,
+        0.88
+      ],
+      "wrong distance+ratio": 0.0033305578684429643,
+      "frr@far1 distance+ratio multi-frame": 0.6890034364261168,
+      "thresholds multi-frame": [
+        0.4350984951108694,
+        0.915
+      ],
+      "accuracy multi-frame": 0.7164948453608248
+    },
+    "uLBP(8,1)+(8,2)": {
+      "accuracy": 0.5670274771024146,
+      "frr@far1 distance": 0.8642797668609492,
+      "thresholds distance": [
+        0.3682669699192047,
+        9.0
+      ],
+      "wrong distance": 0.005828476269775187,
+      "frr@far1 ratio": 0.8076602830974189,
+      "thresholds ratio": [
+        9000000000.0,
+        0.88
+      ],
+      "wrong ratio": 0.002497918401332223,
+      "frr@far1 distance+ratio": 0.7885095753538718,
+      "thresholds distance+ratio": [
+        0.4401152980327606,
+        0.89
+      ],
+      "wrong distance+ratio": 0.004163197335553705,
+      "frr@far1 distance+ratio multi-frame": 0.6460481099656357,
+      "thresholds multi-frame": [
+        0.44868846535682677,
+        0.925
+      ],
+      "accuracy multi-frame": 0.7353951890034365
+    },
+    "uLBP(8,1)+(8,2) weighted": {
+      "accuracy": 0.6727726894254787,
+      "frr@far1 distance": 0.8018318068276437,
+      "thresholds distance": [
+        0.3196251392364502,
+        9.0
+      ],
+      "wrong distance": 0.004995836802664446,
+      "frr@far1 ratio": 0.6902581182348043,
+      "thresholds ratio": [
+        9000000000.0,
+        0.865
+      ],
+      "wrong ratio": 0.0008326394671107411,
+      "frr@far1 distance+ratio": 0.6652789342214821,
+      "thresholds distance+ratio": [
+        0.384323910176754,
+        0.885
+      ],
+      "wrong distance+ratio": 0.0008326394671107411,
+      "frr@far1 distance+ratio multi-frame": 0.5137457044673539,
+      "thresholds multi-frame": [
+        0.44284988760948185,
+        0.905
+      ],
+      "accuracy multi-frame": 0.8350515463917526
+    },
+    "LTP(8,1)+(8,2) Tan-Triggs weighted": {
+      "accuracy": 0.5986677768526228,
+      "frr@far1 distance": 0.8334721065778518,
+      "thresholds distance": [
+        0.21849535062909126,
+        9.0
+      ],
+      "wrong distance": 0.004163197335553705,
+      "frr@far1 ratio": 0.8434637801831807,
+      "thresholds ratio": [
+        9000000000.0,
+        0.8300000000000001
+      ],
+      "wrong ratio": 0.0008326394671107411,
+      "frr@far1 distance+ratio": 0.7868442964196503,
+      "thresholds distance+ratio": [
+        0.25055861473083496,
+        0.87
+      ],
+      "wrong distance+ratio": 0.0016652789342214821,
+      "frr@far1 distance+ratio multi-frame": 0.6855670103092784,
+      "thresholds multi-frame": [
+        0.28271339684724806,
+        0.885
+      ],
+      "accuracy multi-frame": 0.7680412371134021
+    }
+  },
+  "baseline_lbph": {
+    "accuracy": 0.5661948376353039,
+    "far_at_70": 0.9417152373022482,
+    "far_at_50": 0.014154870940882597,
+    "frr_at_50": 0.8617818484596169,
+    "frr@far1": {
+      "distance": 0.880932556203164
+    }
+  },
+  "fusion_frames": 2
+}

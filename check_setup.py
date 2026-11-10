@@ -30,8 +30,13 @@ def main():
     import utils
     from engines import FaceEngine
 
-    engine = FaceEngine()
-    print("OK: Haar cascade and LBPH recognizer available")
+    engine = FaceEngine()       # raises if a cascade file is missing
+    print("OK: Haar + LBP cascades, eye cascade and recognizers available")
+    try:
+        import flask  # noqa: F401
+        print("OK: flask (web dashboard)")
+    except ImportError:
+        print("note: flask missing - the CLI works, app.py needs: pip install flask")
 
     if "--no-camera" in sys.argv:
         return
