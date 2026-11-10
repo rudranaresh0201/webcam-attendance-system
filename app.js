@@ -68,8 +68,13 @@ async function startCamera() {
     video.srcObject = stream; await video.play();
     camOn = true; $("#camOff").hidden = true;
   } catch (err) {
-    $("#camErr").textContent = err.name === "NotAllowedError" ? "Camera permission was refused. Allow it in the browser's address bar, then press the button again."
-      : "No camera found, or it is in use by another app. (" + err.name + ")";
+    $("#camErr").textContent = ({
+      NotAllowedError: "Camera permission was refused. Click the camera icon in the address bar, choose Allow, then press the button again.",
+      NotReadableError: "Another app is using the camera (Zoom, Meet, another tab, or the desktop FaceRoll). Close it, then press the button again.",
+      NotFoundError: "No camera was found on this device.",
+      OverconstrainedError: "The camera doesn't support the requested size. Press the button again.",
+    })[err.name] || `The camera couldn't start (${err.name}). Press the button again.`;
+    if (!window.isSecureContext) $("#camErr").textContent = "Cameras only work on https pages. Open the https:// link.";
   }
 }
 $("#btnCam").onclick = startCamera;
