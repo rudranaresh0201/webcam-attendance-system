@@ -229,8 +229,9 @@ the per-identity distance vectors over $k$ frames (the sum rule of Kittler et al
 stranger's lack of a clear winner does not.
 
 **Result:** FRR at FAR ≤ 1% goes from 66.5% to **51.4%** with only 2 frames (LFW-62),
-and to 24–42% with 4 frames on the 10-person set. The live system requires
-`CONFIRM_FRAMES = 5` consecutive accepted frames before crediting anyone.
+and to 24–42% with 4 frames on the 10-person set. The live system credits a student only when they win **5 of the last 8 frames**
+(`CONFIRM_FRAMES`, `CONFIRM_WINDOW`). That is a vote rather than a strict streak, so a
+single blink or downward glance doesn't discard the evidence.
 
 ### 4.5 Blink liveness from the Haar eye cascade (`tracker.Track.observe_eyes`)
 The stage-1 report listed photo spoofing as out of scope. The Haar eye cascade was

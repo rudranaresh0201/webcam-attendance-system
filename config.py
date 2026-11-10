@@ -53,7 +53,7 @@ LBP_GRID = (8, 8)
 LBP_TERNARY = False              # Local Ternary Patterns instead of LBP
 LTP_T = 5                        # LTP tolerance in gray levels
 CELL_WEIGHTS = "learned"         # "learned" (assets/) or "uniform"
-DIST_THRESHOLD = 0.38            # weighted chi-square per cell, in [0, 2] (benchmark: LFW, FAR <= 1%)
+DIST_THRESHOLD = 0.50            # loose sanity bound; the ratio test does the real work (docs/RESULTS.md §2c)
 RATIO_THRESHOLD = 0.88           # d(best) / d(runner-up identity) (benchmark: LFW, FAR <= 1%)
 
 # OpenCV LBPH baseline
@@ -72,7 +72,8 @@ MAX_BRIGHTNESS = 205
 MIN_IMAGES_TO_TRAIN = 10
 
 # Attendance decision
-CONFIRM_FRAMES = 5               # consecutive accepted frames before a face is credited
+CONFIRM_FRAMES = 5               # accepted frames needed before a face is credited ...
+CONFIRM_WINDOW = 8               # ... out of the last this many frames (5 of 8)
 LIVENESS = False                 # also require a blink (Haar eye cascade) before crediting
 BLINK_MIN_OPEN = 2               # frames with eyes visible before / after the blink
 BLINK_MAX_CLOSED = 8             # a closed-eye run longer than this is not a blink

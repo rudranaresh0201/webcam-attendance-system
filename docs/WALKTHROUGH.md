@@ -103,11 +103,17 @@ credited until they blink, so a printed photograph is never marked present.
 * One thread owns the webcam and runs the shared `FaceEngine` and
   `AttendanceSession`. Flask serves an MJPEG stream and a JSON API.
 * The UI is a single page in plain HTML/CSS/JS with no build step.
-* Three design choices are meant to *teach the method* while it runs:
-  * a **signal-chain strip** with the live parameters of every stage
-  * the **exploded 3-D layer stack**: chip, LBP codes and χ² difference map,
-    stacked like the stages they are, with the nearest identity on top
-  * live **gauges** for d₁ and d₁/d₂ against τ, under the χ² equation itself
+* The UI is meant to *show how it works* while it runs, in plain language:
+  * a sentence above the video saying what it sees and why (*"closest is X, but
+    not close enough: 0.58 against a limit of 0.50"*)
+  * **What the computer sees**: the video itself switches to the pipeline's own
+    images: contrast-fixed (CLAHE), LBP texture, and the raw votes of the Haar and
+    LBP detectors
+  * **How it decided**: the chip, texture codes, difference map and closest student
+    stacked in 3D, with meters against each limit; the χ² formula is under "The maths"
+* After first use the live distance limit was raised from 0.38 to 0.50: a real
+  student measured 0.38–0.47 against their own enrolment, which LFW's limit rejected
+  (RESULTS.md §2c). Confirmation changed from 5 frames in a row to 5 of the last 8.
 * **Calibrate** runs the same open-set protocol on the enrolled class and offers
   the thresholds that keep FAR ≤ 1%.
 
@@ -123,19 +129,19 @@ credited until they blink, so a printed photograph is never marked present.
 
 ## Demo script (≈ 5 minutes)
 
-1. **01 Live, nobody enrolled.** Point at the signal chain: every block is a
-   classical operation with its parameters.
-2. **02 Enrol** yourself (30 captures, about 10 s). Mention the quality gate:
+1. **Live, nobody enrolled.** The sentence says it sees a face but nobody is enrolled.
+   Flip *What the computer sees* through Contrast → Texture → Detector votes.
+2. **Enrol** yourself (30 captures, about 10 s). Mention the quality gate:
    variance of the Laplacian, brightness.
-3. **01 Live → Begin session.** The box turns amber with a 1/5 … 5/5 count, then
+3. **Live → Start attendance.** The box turns amber with a 1/5 … 5/5 count, then
    green, and the log records the time.
 4. Have a classmate who is **not** enrolled sit in. They stay red "Unknown". Show
    the gauges: d₁/d₂ is close to 1 because they are equally far from everyone.
    That is the ratio test working.
-5. **Why this decision**: hover the legend to lift each layer, then click *Lay
-   flat*. The χ² map shows *where* on the face the match differs.
-6. **06 Controls → Require a blink**, then hold up a phone photo of an enrolled
+5. **How it decided**: hover each numbered step to lift its layer, then click *Lay
+   the layers flat*. The χ² map shows *where* on the face the match differs.
+6. **Settings → Ask for a blink**, then hold up a phone photo of an enrolled
    student. It is never credited. Blink in person and you are.
-7. **05 Evidence.** Turn over Fig. 3 (the ratio test) and Fig. 5 (learned weights
+7. **How well it works.** Turn over Fig. 3 (the ratio test) and Fig. 5 (learned weights
    vs Ahonen).
-8. **End & write register → 04 Records.** Download the CSV.
+8. **Finish and save → Records.** Download the CSV.

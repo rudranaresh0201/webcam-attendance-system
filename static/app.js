@@ -1,4 +1,4 @@
-// FaceRoll dashboard. Polls /api/status; no framework, no build step.
+// FaceRoll dashboard. Polls /api/status; plain JS, no build step.
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -15,48 +15,75 @@ async function api(path, opts = {}) {
 }
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 3800); }
 
-// ------------------------------------------------------------------ tabs as faces of a cube
+// ------------------------------------------------------------------ tabs turn like the faces of a cube
 function show(name) {
   if (name === tab) return;
   const prev = tab ? $("#tab-" + tab) : null, next = $("#tab-" + name);
   const fwd = !tab || TABS.indexOf(name) > TABS.indexOf(tab);
   tab = name;
-  $$(".channels a").forEach((a) => a.classList.toggle("on", a.dataset.tab === name));
+  $$(".tabs a").forEach((a) => a.classList.toggle("on", a.dataset.tab === name));
   $$(".face").forEach((f) => f.classList.remove("in-r", "in-l", "out-r", "out-l"));
   if (prev) {
     prev.classList.add(fwd ? "out-r" : "out-l");
-    prev.addEventListener("animationend", () => prev.classList.remove("on", "out-r", "out-l"), { once: true });
-    setTimeout(() => prev.classList.remove("on", "out-r", "out-l"), 800);   // reduced-motion fallback
+    const done = () => prev.classList.remove("on", "out-r", "out-l");
+    prev.addEventListener("animationend", done, { once: true });
+    setTimeout(done, 800);
   }
   next.classList.add("on", fwd ? "in-r" : "in-l");
   next.addEventListener("animationend", () => next.classList.remove("in-r", "in-l"), { once: true });
-  // keep a single MJPEG connection open
-  $("#video").src = name === "live" ? "/stream.mjpg" : "";
+  $("#video").src = name === "live" ? "/stream.mjpg" : "";        // one camera stream at a time
   $("#regVideo").src = name === "register" ? "/stream.mjpg" : "";
   ({ students: loadStudents, records: loadRecords, insights: loadBench, settings: loadSettings })[name]?.();
   try { localStorage.setItem("tab", name); } catch {}
 }
-$$(".channels a").forEach((a) => (a.onclick = () => show(a.dataset.tab)));
-document.addEventListener("keydown", (e) => {
-  if (e.target.matches("input, select, textarea")) return;
-  const n = Number(e.key);
-  if (n >= 1 && n <= TABS.length) show(TABS[n - 1]);
-});
+$$(".tabs a").forEach((a) => (a.onclick = () => show(a.dataset.tab)));
 
-// ------------------------------------------------------------------ signal chain
-function renderChain(s) {
-  const st = s.settings, live = s.mode === "attendance";
-  const det = { consensus: "Haar ∧ LBP", haar: "Haar V–J", lbp: "LBP cascade", union: "Haar ∨ LBP" }[st.DETECTOR];
-  const ill = { clahe: "CLAHE 2.0 / 8×8", tantriggs: "Tan–Triggs", none: "none" }[st.ILLUMINATION];
-  const blocks = [
-    ["acquire", "640 px · mirror"], ["gauss", "3×3 σ auto"], ["luma", ".299R+.587G+.114B"], ["clahe", "clip 2 · 8×8"],
-    ["detect", `${det} · n≥${st.MIN_NEIGHBORS}`], ["chip", "200² · " + ill],
-    [st.LBP_TERNARY ? "ltp" : "u-lbp", "(8,1)+(8,2) · 59 bins"], ["χ² · w", "learned weights"],
-    ["open set", `d≤${st.DIST_THRESHOLD} ∧ r≤${st.RATIO_THRESHOLD}`], ["track", `${st.CONFIRM_FRAMES} frames${st.LIVENESS ? " + blink" : ""}`],
-    ["register", live ? "writing CSV" : "idle"],
-  ];
-  const html = blocks.map(([b, v], i) => `<div class="blk${(live && i === blocks.length - 1) ? " hot" : ""}${i === 4 && s.faces.length ? " hot" : ""}"><b>${esc(b)}</b><span>${esc(v)}</span></div>`).join('<div class="wire"></div>');
-  if (html !== renderChain.h) { renderChain.h = html; $("#chain").innerHTML = html; }
+// ------------------------------------------------------------------ "what the computer sees"
+const VIEW_NOTES = {
+  camera: "The normal camera picture, with the system's decision drawn on top.",
+  contrast: "Slightly blurred to remove grain, turned grey, then contrast evened out tile by tile (CLAHE). This is the picture the face finders actually search.",
+  texture: "Every pixel replaced by its LBP code: 8 \"is my neighbour brighter?\" answers. Turn a lamp on or off and the photo changes a lot, but these codes barely change. That is why recognition survives a dim room.",
+  votes: "What each face finder says on its own, before they vote. Haar (blue) looks for light-and-dark blocks, such as eyes being darker than cheeks. LBP (orange) looks for texture. A face is kept when they agree.",
+};
+function setView(v, send = true) {
+  $$("#viewSeg button").forEach((b) => b.classList.toggle("on", b.dataset.view === v));
+  $("#viewNote").textContent = VIEW_NOTES[v];
+  if (send) api("/api/view", { json: { view: v } });
+}
+$$("#viewSeg button").forEach((b) => (b.onclick = () => setView(b.dataset.view)));
+
+// ------------------------------------------------------------------ plain-language narration
+function narrate(s) {
+  const st = s.settings, faces = s.faces;
+  if (!s.camera_ok) return ["no", "The camera isn't available.", "Close any other app using the webcam, or turn the camera on in Settings."];
+  if (s.mode === "register") return ["wait", "Enrolling…", "Follow the instructions on the Enrol tab."];
+  if (!faces.length) return ["", "I don't see anyone.", "Face the camera from about an arm's length away, with light on your face."];
+  const f = faces.reduce((a, b) => (a.box[2] * a.box[3] > b.box[2] * b.box[3] ? a : b));
+  const more = faces.length > 1 ? `I can see ${faces.length} faces; this is about the biggest one. ` : "";
+  const rec = s.mode === "attendance";
+  if (f.state === "face" || !s.model_ok) return ["wait", "I can see a face, but nobody is enrolled yet.", more + "Go to Enrol and add yourself; then I'll know who you are."];
+  if (f.state === "unknown") {
+    if (f.dist > st.DIST_THRESHOLD)
+      return ["no", "I can see a face, but I don't recognise it.",
+        more + `The closest enrolled student is ${f.nearest}, but not close enough: a difference of ${f.dist.toFixed(2)} against a limit of ${st.DIST_THRESHOLD}.`];
+    return ["no", "I can see a face, but I'm not sure who it is.",
+      more + `It's close to ${f.nearest}, but almost as close to someone else (ratio ${f.ratio.toFixed(2)}, limit ${st.RATIO_THRESHOLD}), so I won't guess.`];
+  }
+  if (f.state === "verifying")
+    return ["wait", `This looks like ${f.name}.`, more + `Checking a few more frames to be sure: ${Math.min(f.streak, st.CONFIRM_FRAMES)} of ${st.CONFIRM_FRAMES}.` + (rec ? "" : " Press Start attendance to record it.")];
+  if (f.state === "blink") return ["wait", `${f.name}, please blink.`, more + "This checks that it's a real person and not a photo."];
+  if (f.state === "marked") {
+    const row = s.roster.find((r) => r.roll === f.roll);
+    return ["ok", `${f.name} is marked present.`, more + (row?.time ? `Recorded at ${row.time}.` : "")];
+  }
+  return ["", "", ""];
+}
+
+function meter(title, v, thr, max, note) {
+  const ok = v <= thr;
+  return `<div class="meter">${title}
+    <div class="bar"><em style="width:${Math.min(100, (v / max) * 100)}%;background:var(${ok ? "--green" : "--red"})"></em><i style="left:${Math.min(100, (thr / max) * 100)}%"></i></div>
+    <div class="val"><span>${note}</span><span>${v.toFixed(2)} / limit ${thr}</span></div></div>`;
 }
 
 // ------------------------------------------------------------------ polling
@@ -65,64 +92,52 @@ async function poll() {
   setTimeout(poll, 400);
 }
 
-function gauge(label, v, thr, max) {
-  const ok = v <= thr;
-  return `<div class="gauge ${ok ? "ok" : "no"}"><span>${label}</span>
-    <div class="g"><em style="width:${Math.min(100, (v / max) * 100)}%;background:var(${ok ? "--green" : "--red"})"></em><i style="left:${Math.min(100, (thr / max) * 100)}%"></i></div>
-    <b>${v.toFixed(3)}</b></div>`;
-}
-
 function render(s) {
-  $("#modePill").textContent = s.mode;
-  $("#modePill").className = s.mode;
-  $("#modelInfo").textContent = s.model_ok ? `${s.students} enrolled · ${s.recognizer === "openset" ? "open-set LBP" : "LBPH"}` : (s.training ? "training…" : "untrained");
-  $("#kFps").textContent = s.camera_ok ? `${s.fps.toFixed(1)} fps` : "no camera";
-  $("#dateLine").textContent = s.date;
-  $("#btnStart").hidden = s.mode === "attendance";
-  $("#btnStop").hidden = s.mode !== "attendance";
-  $("#recDot").hidden = s.mode !== "attendance";
-  $("#confN").textContent = s.settings.CONFIRM_FRAMES;
-  renderChain(s);
+  const rec = s.mode === "attendance";
+  $("#sessionText").textContent = rec ? "Recording attendance" : (s.training ? "Learning faces…" : "Not recording");
+  $("#sessionText").className = rec ? "rec" : "";
+  $("#btnStart").hidden = rec;
+  $("#btnStop").hidden = !rec;
+  if (render.view !== s.view) { render.view = s.view; setView(s.view, false); }
+
+  const [cls, line, sub] = narrate(s);
+  $("#say").className = "say " + cls;
+  $("#say").innerHTML = `${esc(line)}<small>${esc(sub)}</small>`;
 
   const present = s.roster.filter((r) => r.status === "Present").length;
-  $("#kPresent").innerHTML = `${present}<small>/${s.roster.length}</small>`;
-  $("#kFaces").textContent = s.faces.length;
-  $("#kUnknown").textContent = s.unknown_seen;
-  $("#rosterCount").textContent = s.roster.length ? `${present} of ${s.roster.length}` : "";
-
+  $("#kPresent").textContent = present;
+  $("#kTotal").textContent = s.roster.length;
   const rk = JSON.stringify(s.roster);
   if (rk !== render.rk) {
     render.rk = rk;
     $("#roster").innerHTML = s.roster.length ? s.roster.map((r) => `
       <li class="${r.status}"><img class="avatar" src="/api/students/${encodeURIComponent(r.roll)}/photo" alt="" onerror="this.style.visibility='hidden'">
       <div><b>${esc(r.name)}</b><span class="r">${esc(r.roll)}${r.time ? " · " + esc(r.time) : ""}</span></div>
-      <span class="st ${r.status}">${r.status}</span></li>`).join("") : `<li class="dim">Nobody enrolled yet &mdash; see <b>02 Enrol</b>.</li>`;
+      <span class="tag ${r.status}">${r.status}</span></li>`).join("") : `<li class="empty-note">Nobody enrolled yet.</li>`;
   }
   const fk = JSON.stringify(s.events);
   if (fk !== render.fk) {
     render.fk = fk;
-    $("#feed").innerHTML = s.events.length ? s.events.map((e) => `<li><time>${esc(e.time)}</time>${esc(e.name)} credited present</li>`).join("")
-      : `<li class="dim">${s.mode === "attendance" ? "Session open. Waiting for the first face…" : "Begin a session to record arrivals."}</li>`;
+    $("#feed").innerHTML = s.events.length ? s.events.map((e) => `<li><time>${esc(e.time)}</time>${esc(e.name)}</li>`).join("")
+      : `<li class="empty-note">${rec ? "Waiting for the first person…" : "Press Start attendance to begin."}</li>`;
   }
 
-  // decision readout for each recognised face
   const st = s.settings, faces = s.faces.filter((f) => f.dist !== null);
   $("#faceTable").innerHTML = faces.length ? faces.map((f) => `
-    <div class="fr">
-      <div class="fr-head"><b>${esc(f.name || "Unknown")}</b><span>${esc(f.state)} · ${esc(f.sources)} · ${f.streak}/${st.CONFIRM_FRAMES}${st.LIVENESS ? (f.blinked ? " · blink ✓" : " · no blink") : ""}</span></div>
-      ${gauge("d₁", f.dist, st.DIST_THRESHOLD, Math.max(0.8, f.dist))}
-      ${gauge("d₁ / d₂", f.ratio, st.RATIO_THRESHOLD, 1.0)}
-    </div>`).join("") : `<p class="dim">${s.model_ok ? "No face in view." : "Enrol students to see matching distances."}</p>`;
+    <div>
+      <div class="fr-head"><b>${esc(f.name || "Not recognised")}</b><span>closest: ${esc(f.nearest || "–")}</span></div>
+      ${meter("How different from the closest student", f.dist, st.DIST_THRESHOLD, Math.max(0.8, f.dist), "lower = more alike")}
+      ${s.students > 1 ? meter("Closest compared with the runner-up", f.ratio, st.RATIO_THRESHOLD, 1.0, "lower = more certain")
+        : `<p class="muted small">Only one student is enrolled, so the "clearly better than the runner-up" check can't run yet. Enrol a second person for full protection against strangers.</p>`}
+    </div>`).join("") : `<p class="muted">${s.model_ok ? "When a face is in view, its numbers appear here." : "Enrol someone to see how matching works."}</p>`;
 
   if (tab === "live" && !render.loading) {
-    // preload so the stack never flashes empty
     render.loading = true;
     const url = "/explain.jpg?t=" + Date.now(), im = new Image();
     im.onload = im.onerror = () => { $$(".layer .img").forEach((d) => (d.style.backgroundImage = `url(${url})`)); render.loading = false; };
     im.src = url;
   }
 
-  // enrolment
   const reg = s.register, active = s.mode === "register" && reg;
   $("#btnReg").disabled = active || s.training;
   $("#btnRegCancel").hidden = !active;
@@ -132,31 +147,31 @@ function render(s) {
     $("#regHint").textContent = reg.hint;
   } else if (render.wasReg) {
     $("#ringProg").style.strokeDashoffset = 0;
-    $("#regHint").textContent = s.training ? "Captured. Training…" : "Done. Enrol the next student, or go to Live.";
+    $("#regHint").textContent = s.training ? "Got it. Learning your face…" : "Done. Enrol the next person, or go to Live.";
   }
   render.wasReg = active;
   if (s.message && s.message !== lastMsg) { lastMsg = s.message; toast(s.message); }
 }
 
-$$("#stackLegend li").forEach((li) => {
+$$("#steps li").forEach((li) => {
   const layer = $$(".layer")[+li.dataset.l];
   li.onmouseenter = () => layer.classList.add("lift");
   li.onmouseleave = () => layer.classList.remove("lift");
 });
-$("#btnFlat").onclick = () => { const f = $("#stack").classList.toggle("flat"); $("#btnFlat").textContent = f ? "Explode" : "Lay flat"; };
-$("#btnStart").onclick = async () => { try { await api("/api/attendance/start", { json: {} }); } catch (e) { toast(e.message); } };
+$("#btnFlat").onclick = () => { const f = $("#stack").classList.toggle("flat"); $("#btnFlat").textContent = f ? "Stack the layers in 3D" : "Lay the layers flat"; };
+$("#btnStart").onclick = async () => { try { await api("/api/attendance/start", { json: {} }); show("live"); } catch (e) { toast(e.message); } };
 $("#btnStop").onclick = () => api("/api/attendance/stop", { json: {} });
 
 // ------------------------------------------------------------------ enrolment
-$$(".seg button").forEach((b) => (b.onclick = () => {
-  $$(".seg button").forEach((x) => x.classList.toggle("on", x === b));
+$$("#tab-register .seg button").forEach((b) => (b.onclick = () => {
+  $$("#tab-register .seg button").forEach((x) => x.classList.toggle("on", x === b));
   $("#srcCam").hidden = b.dataset.src !== "cam";
   $("#srcUpload").hidden = b.dataset.src !== "upload";
 }));
 async function startReg(overwrite = false) {
   try { await api("/api/register/start", { json: { roll: $("#rRoll").value, name: $("#rName").value, overwrite } }); }
   catch (e) {
-    if (e.status === 409 && confirm(e.message + " Replace their images?")) return startReg(true);
+    if (e.status === 409 && confirm(e.message + " Replace their photos?")) return startReg(true);
     toast(e.message);
   }
 }
@@ -167,97 +182,96 @@ $("#btnUpload").onclick = async () => {
   fd.append("roll", $("#rRoll").value); fd.append("name", $("#rName").value);
   for (const f of $("#rFiles").files) fd.append("photos", f);
   $("#btnUpload").disabled = true;
-  try { const r = await api("/api/register/upload", { method: "POST", body: fd }); toast(`Imported ${r.saved} photographs. Training…`); }
+  try { const r = await api("/api/register/upload", { method: "POST", body: fd }); toast(`Imported ${r.saved} photos.`); }
   catch (e) { toast(e.message); }
   $("#btnUpload").disabled = false;
 };
 
-// ------------------------------------------------------------------ students (flip to see captures)
+// ------------------------------------------------------------------ students
 async function loadStudents() {
   const list = await api("/api/students");
   const ph = (r, i) => `/api/students/${encodeURIComponent(r)}/photo?i=${i}`;
   $("#studentCards").innerHTML = list.length ? list.map((s) => `
     <div class="flip" tabindex="0">
       <div class="front"><img src="${ph(s.roll, 0)}" alt="">
-        <div class="body"><b>${esc(s.name)}</b><span>${esc(s.roll)} · ${s.images} img${s.trained ? "" : " · untrained"}</span></div></div>
+        <div class="body"><b>${esc(s.name)}</b><span>${esc(s.roll)} · ${s.images} photos${s.trained ? "" : " · not learned yet"}</span></div></div>
       <div class="back"><div class="thumbs">${[3, 7, 11, 15, 19, 23, 26, 28, 29].filter((i) => i < s.images).map((i) => `<img loading="lazy" src="${ph(s.roll, i)}" alt="">`).join("")}</div>
-        <div class="row"><span>${esc(s.roll)}</span><button data-del="${esc(s.roll)}">Remove</button></div></div>
-    </div>`).join("") : `<div class="panel empty">Nobody enrolled yet.</div>`;
+        <div class="row"><span>${esc(s.name)}</span><button data-del="${esc(s.roll)}">Remove</button></div></div>
+    </div>`).join("") : `<div class="card empty">Nobody enrolled yet.</div>`;
   $$(".flip").forEach((c) => (c.onclick = (e) => { if (!e.target.dataset.del) c.classList.toggle("turned"); }));
   $$("[data-del]").forEach((b) => (b.onclick = async () => {
-    if (!confirm(`Remove ${b.dataset.del} and all their face images?`)) return;
+    if (!confirm(`Remove ${b.dataset.del} and their photos?`)) return;
     await api("/api/students/" + encodeURIComponent(b.dataset.del), { method: "DELETE" });
     loadStudents();
   }));
 }
-$("#btnTrain").onclick = () => api("/api/train", { json: {} }).then(() => toast("Training…"));
+$("#btnTrain").onclick = () => api("/api/train", { json: {} }).then(() => toast("Learning faces…"));
 
 // ------------------------------------------------------------------ records
 async function loadRecords() {
   const recs = await api("/api/records");
   $("#recordList").innerHTML = recs.length ? recs.map((r, i) => `
-    <details class="panel reg" ${i === 0 ? "open" : ""}><summary><b>${esc(r.date)}</b>
-      <span class="frac-big">${r.present} / ${r.total} present</span><span class="grow"></span>
-      <a href="/api/records/${esc(r.date)}.csv"><button>CSV</button></a></summary>
+    <details class="card reg" ${i === 0 ? "open" : ""}><summary><b>${esc(r.date)}</b>
+      <span class="muted">${r.present} of ${r.total} present</span><span class="grow"></span>
+      <a href="/api/records/${esc(r.date)}.csv"><button>Download CSV</button></a></summary>
       <table><thead><tr><th>Roll</th><th>Name</th><th>Status</th><th>Time</th></tr></thead><tbody>
-      ${r.rows.map((x) => `<tr><td class="m">${esc(x.roll)}</td><td>${esc(x.name)}</td><td><span class="st ${esc(x.status)}">${esc(x.status)}</span></td><td class="m">${esc(x.time)}</td></tr>`).join("")}
-      </tbody></table></details>`).join("") : `<div class="panel empty">No sessions recorded yet.</div>`;
+      ${r.rows.map((x) => `<tr><td>${esc(x.roll)}</td><td>${esc(x.name)}</td><td><span class="tag ${esc(x.status)}">${esc(x.status)}</span></td><td>${esc(x.time)}</td></tr>`).join("")}
+      </tbody></table></details>`).join("") : `<div class="card empty">No attendance taken yet.</div>`;
 }
 
 // ------------------------------------------------------------------ evidence
 async function loadBench() {
   const b = await api("/api/benchmarks");
-  const pct = (x) => (100 * x).toFixed(1) + "%";
+  const pct = (x) => Math.round(100 * x) + "%";
   const k = [];
-  let det, lfw, v, y, y4;
+  let det, lfw, v, y;
   if (b.detection) {
     det = b.detection.mosaic;
-    k.push(["false boxes / frame", det.consensus.false_per_frame.toFixed(2), `Haar alone ${det.haar.false_per_frame.toFixed(2)} &middot; recall ${pct(det.consensus.recall)}`]);
+    k.push(["Wrong boxes per frame", det.consensus.false_per_frame.toFixed(2), `was ${det.haar.false_per_frame.toFixed(2)} with Haar alone`]);
   }
   if (b.lfw_all62_20) {
     lfw = b.lfw_all62_20; v = lfw.variants["uLBP(8,1)+(8,2) weighted"];
-    k.push(["LFW rank-1, 62 people", pct(v.accuracy), `OpenCV LBPH ${pct(lfw.baseline_lbph.accuracy)}`]);
-    k.push(["students missed @ FAR 1%", pct(v["frr@far1 distance+ratio multi-frame"]), `${lfw.fusion_frames}-frame fusion &middot; LBPH ${pct(lfw.baseline_lbph["frr@far1"].distance)}`]);
+    k.push(["Right person picked (62 people)", pct(v.accuracy), `was ${pct(lfw.baseline_lbph.accuracy)} with OpenCV's LBPH`]);
+    k.push(["Students missed, strangers kept out", pct(v["frr@far1 distance+ratio multi-frame"]), `was ${pct(lfw.baseline_lbph["frr@far1"].distance)}; lower is better`]);
   }
   if (b.yale) {
-    y = b.yale.variants; y4 = y["LTP(8,1)+(8,2), Tan-Triggs"]["4"];
-    k.push(["Yale B side light (S4)", pct(y4), `raw LBP ${pct(y["LBP 256-bin, no normalisation (LBPH-like)"]["4"])}`]);
+    y = b.yale.variants;
+    k.push(["Recognised with light from the side", pct(y["LTP(8,1)+(8,2), Tan-Triggs"]["4"]), `was ${pct(y["LBP 256-bin, no normalisation (LBPH-like)"]["4"])}`]);
   }
-  $("#benchKpis").innerHTML = k.map(([a, val, sub]) => `<div class="ro"><span>${a}</span><b>${val}</b><p>${sub}</p></div>`).join("")
-    || `<div class="ro"><span>no results</span><p>Run <code>python benchmark.py</code>.</p></div>`;
+  $("#benchKpis").innerHTML = k.map(([a, val, sub]) => `<div class="stat"><span>${a}</span><b>${val}</b><p>${sub}</p></div>`).join("");
 
   const figs = [
-    ["pipeline_stages.png", "The chain, stage by stage", "Fig. 1", true,
-      `<p>An LFW photograph through every stage: Gaussian smoothing, luma conversion, CLAHE, the two cascades (Haar in blue, LBP in orange), the normalised chip, raw LBP codes, the 59-bin uniform mapping and the histogram of a single cell.</p>
-       <p>A uniform pattern has at most two 0/1 transitions around the circle. These 58 patterns are spots, edges, corners and line ends, and they cover most of a face's texture. Every other pattern shares one bin, which shrinks each cell from 256 bins to 59.</p>`],
-    ["detection_modes.png", "Two cascades, one vote", "Fig. 2", true, det ? `
-       <div class="num">${det.haar.false_per_frame.toFixed(2)} &rarr; ${det.consensus.false_per_frame.toFixed(2)}</div>
-       <p>False boxes per 640&times;500 frame on 250 mosaics of four LFW faces.</p>
-       <p>Haar rectangle features (sums over regions) and LBP features (sign comparisons) fail on <b>different</b> backgrounds. A box is accepted when both cascades agree, or when one of them is backed by an eye pair or by &ge;20 Haar neighbours. Recall goes from ${pct(det.haar.recall)} to ${pct(det.consensus.recall)}.</p>` : ""],
-    ["far_frr_all62_20.png", "Strangers versus students", "Fig. 3", false, lfw ? `
-       <div class="num">${pct(lfw.baseline_lbph["frr@far1"].distance)} &rarr; ${pct(v["frr@far1 distance+ratio"])} &rarr; ${pct(v["frr@far1 distance+ratio multi-frame"])}</div>
-       <p>Students missed when at most 1% of strangers may get in (LFW, 62 people, leave-one-person-out impostors). In stage 1 the absolute distance threshold alone could not separate the two groups.</p>
-       <p><b>Ratio test:</b> a stranger is about equally far from everyone, while a student is much closer to their own templates than to the runner-up. So the system accepts only when d<sub>1</sub>/d<sub>2</sub> &le; &tau;<sub>r</sub>. <b>Fusion</b> averages per-identity distances over ${lfw.fusion_frames} frames, which is what the tracker supplies in the live system.</p>` : ""],
-    ["yale_recognition.png", "Lighting from the side", "Fig. 4", false, y ? `
-       <div class="num">${pct(y["LBP 256-bin, no normalisation (LBPH-like)"]["5"])} &rarr; ${pct(y["LTP(8,1)+(8,2), Tan-Triggs"]["5"])}</div>
-       <p>Extended Yale B, worst lighting subset (light more than 77&deg; off-axis). Gallery: subset 1 only.</p>
-       <p>Tan&ndash;Triggs applies gamma 0.2, then a difference of Gaussians (&sigma; = 1, 2) that removes slow shading, then robust contrast equalisation. Local Ternary Patterns add a dead zone of &plusmn;5 grey levels, so noise in flat, dark regions stops flipping bits.</p>` : ""],
-    ["cell_weights.png", "Which parts of the face matter", "Fig. 5", false, `
-       <p>Each of the 128 cells (8&times;8 grid &times; two radii) is weighted by its Fisher ratio (&mu;<sub>b</sub>&minus;&mu;<sub>w</sub>)&sup2;/(&sigma;<sub>b</sub>&sup2;+&sigma;<sub>w</sub>&sup2;), measured on χ² distances between pairs of the same person and pairs of different people.</p>
-       <p>The weights were learned on 96 LFW identities (937 images) that are <b>never used in testing</b>. They recover Ahonen's hand-set map: eyes and brows weigh ~3&times;, while corners, hair and background fall to ~0.</p>`],
-    ["detection_lighting.png", "Detection as the lamp moves", "Fig. 6", false, `
-       <p>Faces found per Yale B lighting subset. The Yale crops are tight, which suits the LBP cascade. That is why consensus with eye rescue beats Haar alone here.</p>
-       <p>Past 50&deg; neither detector copes: half the face is in shadow. This is the practical limit of a frontal classical detector.</p>`],
+    ["pipeline_stages.png", "Every step on one photo", true,
+      `<p>From left: the photo, grey and slightly blurred, contrast evened out, the two face finders (Haar blue, LBP orange), the cropped face, its texture codes, the same codes simplified to 59 kinds, and the count of each kind in one square of the face.</p>
+       <p>Those counts, for all 64 squares at two sizes, are the face's "fingerprint".</p>`],
+    ["detection_modes.png", "Two face finders voting", true, det ? `
+       <div class="num">${det.haar.false_per_frame.toFixed(2)} → ${det.consensus.false_per_frame.toFixed(2)} wrong boxes per frame</div>
+       <p>Haar adds up light and dark blocks; LBP compares neighbouring pixels. They are fooled by different things (curtains, shelves, patterned shirts), so when both agree it's almost always a real face.</p>
+       <p>The cost: ${pct(det.haar.recall)} → ${pct(det.consensus.recall)} of faces found, which the 5-frame check makes up for.</p>` : ""],
+    ["far_frr_all62_20.png", "Keeping strangers out", false, lfw ? `
+       <div class="num">${pct(lfw.baseline_lbph["frr@far1"].distance)} → ${pct(v["frr@far1 distance+ratio multi-frame"])}</div>
+       <p>Share of real students wrongly turned away, when at most 1 stranger in 100 is allowed in.</p>
+       <p>The fix is the <b>runner-up test</b>: a real student is much closer to their own photos than to anyone else's, while a stranger is roughly equally far from everyone. Averaging over a couple of frames helps further.</p>` : ""],
+    ["yale_recognition.png", "Light from the side", false, y ? `
+       <div class="num">${pct(y["LBP 256-bin, no normalisation (LBPH-like)"]["4"])} → ${pct(y["LTP(8,1)+(8,2), Tan-Triggs"]["4"])}</div>
+       <p>Faces lit from 50–77° to the side, matched against photos lit from the front.</p>
+       <p>The "Remove shadows" setting (Tan–Triggs) brightens dark areas, filters out the slow shadow gradient and keeps the fine detail. LTP ignores tiny brightness differences that are just noise.</p>` : ""],
+    ["cell_weights.png", "Which parts of the face matter", false, `
+       <p>We measured, square by square, how well each part of the face tells people apart, using 96 people who are never used for testing.</p>
+       <p>It found by itself what researchers set by hand in 2004: eyes and eyebrows matter about 3× more than average; corners (hair, background) hardly at all.</p>`],
+    ["detection_lighting.png", "Finding faces as the lamp moves", false, `
+       <p>Share of faces found as the light moves further to the side.</p>
+       <p>Past about 50° half the face is in shadow and neither finder copes. That's the honest limit of a classical frontal detector.</p>`],
   ];
-  $("#figs").innerHTML = figs.map(([src, title, n, span, back]) => `
+  $("#figs").innerHTML = figs.map(([src, title, span, back]) => `
     <div class="fig${span ? " span" : ""}" tabindex="0">
-      <div class="front"><h3>${title}<small>${n} &middot; turn over</small></h3><img src="/figures/${src}" alt="${esc(title)}"></div>
+      <div class="front"><h3>${title}<small>click to flip</small></h3><img src="/figures/${src}" alt="${esc(title)}"></div>
       <div class="back"><h3>${title}</h3>${back}</div>
     </div>`).join("");
   $$(".fig").forEach((f) => (f.onclick = () => f.classList.toggle("turned")));
 }
 
-// ------------------------------------------------------------------ controls
+// ------------------------------------------------------------------ settings
 const KEYS = ["DETECTOR", "ILLUMINATION", "LBP_TERNARY", "DIST_THRESHOLD", "RATIO_THRESHOLD", "CONFIRM_FRAMES", "LIVENESS", "MIN_NEIGHBORS"];
 async function loadSettings() {
   const s = await api("/api/settings");
@@ -272,7 +286,7 @@ $("#btnSave").onclick = async () => {
   const body = {};
   for (const k of KEYS) { const el = $("#s" + k); body[k] = el.type === "checkbox" ? el.checked : (el.type === "range" ? Number(el.value) : el.value); }
   await api("/api/settings", { json: body });
-  toast("Applied.");
+  toast("Saved.");
 };
 let suggestion = null;
 $("#btnCal").onclick = async () => {
@@ -283,7 +297,7 @@ $("#btnCal").onclick = async () => {
 };
 $("#btnCalApply").onclick = async () => {
   await api("/api/settings", { json: { DIST_THRESHOLD: +suggestion.dist.toFixed(3), RATIO_THRESHOLD: +suggestion.ratio.toFixed(2) } });
-  loadSettings(); toast("Thresholds applied.");
+  loadSettings(); toast("Applied.");
 };
 $("#camOn").onchange = (e) => api("/api/camera", { json: { on: e.target.checked } });
 

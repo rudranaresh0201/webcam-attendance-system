@@ -50,14 +50,13 @@ python app.py                        # web dashboard -> http://127.0.0.1:8000
 
 | channel | what it does |
 |---|---|
-| **01 Live** | Camera with overlays, today's register and an arrivals log. "Why this decision" is a 3-D exploded view of chip → LBP codes → χ² difference map → nearest identity, with live gauges of d₁ and d₁/d₂ against their thresholds. *Begin session* starts recording; *End* writes absentees. |
-| **02 Enrol** | Name and roll number, then 30 guided webcam captures (blurred, dark or over-bright frames are refused), or import ≥ 10 photos. The model retrains automatically. |
-| **03 Students** | Enrolled students; click a card to flip it and see the captures. |
-| **04 Records** | One register per day, downloadable as CSV. |
-| **05 Evidence** | The benchmark results; click a plot to turn it over for the explanation. |
-| **06 Controls** | Detector, illumination, LTP, thresholds, frames to confirm, blink liveness. *Calibrate* measures the right thresholds on your own class. |
+| **Live** | A plain sentence says what the system sees and why ("closest is X, but not close enough: 0.58 vs 0.50"). **What the computer sees** switches the video to the pipeline's own images: contrast-fixed, LBP texture, and each detector's raw votes. **How it decided** shows the layers in 3D (face → texture codes → difference map → closest student) with meters against each limit. |
+| **Enrol** | Name and roll number, then 30 guided webcam captures (blurred, dark or over-bright frames are refused), or import ≥ 10 photos. The model retrains automatically. |
+| **Students** | Enrolled students; click a card to flip it and see the captures. |
+| **Records** | One register per day, downloadable as CSV. |
+| **How well it works** | The benchmark results; click a chart to flip it for a plain explanation. |
+| **Settings** | Detector, lighting fix, LTP, limits, frames, blink check. *Tune for this class* measures the right limits on your own students. |
 
-Keys 1–6 switch channels.
 
 The original command-line tools still work and share the same pipeline:
 
@@ -84,7 +83,7 @@ re-run on the same day keeps earlier Present marks.
 | **features** | our NumPy LBP: uniform (59 bins), radii 1 and 2, 8×8 grid; optional LTP | `lbp.py` |
 | **matching** | χ² with **learned per-cell weights**, minimum over each person's templates | `lbp.py`, `recognizer.py` |
 | **open-set decision** | d₁ ≤ τ_d **and ratio test** d₁/d₂ ≤ τ_r | `recognizer.py` |
-| temporal | IoU tracker; credited after 5 consecutive accepted frames; optional **blink** | `tracker.py`, `attendance.py` |
+| temporal | IoU tracker; credited when accepted in **5 of the last 8 frames**; optional **blink** | `tracker.py`, `attendance.py` |
 | output | CSV per day | `attendance.py` |
 
 OpenCV's LBPH is kept as a baseline (`RECOGNIZER = "lbph"` in `config.py`).
@@ -128,4 +127,4 @@ and attendance sheets.
 * Faces smaller than 80×80 px are ignored, so a large lecture hall needs a
   higher-resolution camera.
 * The blink check stops printed photos but not a video replay.
-* The thresholds shipped are from LFW. Calibrate on your own students.
+* With only one student enrolled, the runner-up test can't run. Enrol at least two, and tune on three or more.

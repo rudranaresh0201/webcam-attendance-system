@@ -92,7 +92,7 @@ class AttendanceSession:
             track.observe(match)
             if config.LIVENESS:
                 track.observe_eyes(self.engine.detector.count_eyes(gray, track.face.box))
-            student = self.labels.get(track.label)
+            student = self.labels.get(track.label)      # leader of the last-8-frames vote
             state = "unknown"
             if student is not None:
                 if track.confirmed and track.live and student["roll"] not in self.present:

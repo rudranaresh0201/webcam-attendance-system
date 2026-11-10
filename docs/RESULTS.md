@@ -85,9 +85,30 @@ error is a rejection ("not sure"), not a misidentification, which is the right
 failure mode for attendance: a missed student can be marked by hand, but a false
 mark is never noticed.
 
-The default thresholds in `config.py` (τ_d = 0.38, τ_r = 0.88) come from this run.
-LFW is far harder than one webcam in one room, so **recalibrate on your own class**
-(Controls → Calibrate, or `python evaluate.py`).
+The best operating point here was τ_d = 0.38 and τ_r = 0.88.
+
+### 2c. Choosing the live distance limit
+
+On LFW, the distance alone barely separates people: the median d₁ of a correct
+match is 0.35, and the median d₁ of a stranger is 0.40. **The ratio test does the
+real work.** Loosening τ_d with τ_r fixed at 0.88:
+
+| τ_d | strangers accepted (1 frame) | (2-frame fusion) | students missed (1 frame) |
+|---|---|---|---|
+| 0.38 | 0.8% | 0.2% | 67.4% |
+| 0.45 | 1.6% | 0.2% | 65.0% |
+| **0.50** | **1.7%** | **0.2%** | **64.7%** |
+
+On the webcam, a student's live face against their own enrolment photos (taken a
+little earlier) measured 0.38–0.47. The same person against other people's photos
+measured 0.60–0.64. So 0.38 turned real students away. The live default is
+**τ_d = 0.50**: a loose sanity bound, with the ratio test and the 5-of-8-frame
+vote keeping strangers out.
+
+*Caveat:* with **only one** student enrolled there is no runner-up, so the ratio
+test cannot run and τ_d is the only guard. The UI says so. In a real class this
+never happens. Run **Settings → Tune for this class** (or `python evaluate.py`)
+once three or more students are enrolled.
 
 ![FAR vs FRR](figures/far_frr_all62_20.png)
 

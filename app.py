@@ -70,8 +70,8 @@ if SETTINGS_PATH.exists():
 
 # ============================================================================ drawing
 # BGR versions of the UI palette (static/style.css)
-COL = {"marked": (127, 211, 143), "verifying": (65, 165, 242), "blink": (255, 180, 111),
-       "unknown": (87, 107, 255), "face": (220, 231, 235)}
+COL = {"marked": (80, 175, 40), "verifying": (0, 170, 245), "blink": (230, 140, 30),
+       "unknown": (60, 60, 220), "face": (235, 235, 235)}
 
 
 def draw_face(view, box, color, title, sub=None):
@@ -88,7 +88,17 @@ def draw_face(view, box, color, title, sub=None):
     cv2.putText(view, title, (x + 6, ty), font, 0.55, (20, 20, 20), 1, cv2.LINE_AA)
     if sub:
         cv2.putText(view, sub, (x + 4, y + h - 8), font, 0.45, (0, 0, 0), 3, cv2.LINE_AA)
-        cv2.putText(view, sub, (x + 4, y + h - 8), font, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(view, sub, (x + 4, y + h - 8), font, 0.45, (255, 255, 255), 1, cv2.LINE_AA)  # optional detail
+
+
+def fast_lbp(gray):
+    """3x3 LBP of a whole frame with integer shifts (fast enough for live video)."""
+    g = gray.astype(np.int16)
+    c = g[1:-1, 1:-1]
+    out = np.zeros(c.shape, np.uint8)
+    for bit, (dy, dx) in enumerate(((0, 1), (0, 2), (1, 2), (2, 2), (2, 1), (2, 0), (1, 0), (0, 0))):
+        out |= ((g[dy:dy + c.shape[0], dx:dx + c.shape[1]] >= c).astype(np.uint8) << bit)
+    return cv2.copyMakeBorder(out, 1, 1, 1, 1, cv2.BORDER_REPLICATE)
 
 
 def placeholder(text):
@@ -199,26 +209,27 @@ class Worker:
         else:
             results = [{"box": f.box, "sources": f.sources, "state": "face", "match": None, "student": None,
                         "chip": None, "track": None} for f in self.engine.detect(frame)]
-        view = frame.copy()
+        view = self.render_view(frame)
         faces = []
         for r in results:
             m, s, st = r["match"], r["student"], r["state"]
+            nearest = self.labels.get(m.label) if m is not None else None
             if st == "face":
-                title = f"face [{r['sources']}]"
+                title = "face found"
             elif st == "unknown":
-                title = "Unknown"
+                title = "not recognised"
             elif st == "marked":
-                title = f"{s['name']}  present"
+                title = f"{s['name']} - present"
             elif st == "blink":
-                title = f"{s['name']}  blink!"
+                title = f"{s['name']} - please blink"
             else:
                 tr = r["track"]
-                title = f"{s['name']}  {tr.streak}/{config.CONFIRM_FRAMES}" if tr else s["name"]
-            sub = f"d {m.score:.2f}  r {m.ratio:.2f}  [{r['sources']}]" if m is not None else None
-            draw_face(view, r["box"], COL[st], title, sub)
+                title = f"{s['name']}?  {tr.streak}/{config.CONFIRM_FRAMES}" if tr else s["name"]
+            draw_face(view, r["box"], COL[st], title)
             faces.append({
                 "state": st, "sources": r["sources"], "box": list(r["box"]),
                 "name": s["name"] if s else None, "roll": s["roll"] if s else None,
+                "nearest": nearest["name"] if nearest else None,
                 "dist": round(m.score, 3) if m else None,
                 "ratio": round(m.ratio, 3) if m else None,
                 "streak": r["track"].streak if r["track"] else 0,
@@ -236,6 +247,28 @@ class Worker:
             self.explain = cv2.imencode(".jpg", panel)[1].tobytes()
         return view
 
+    VIEWS = ("camera", "contrast", "texture", "votes")
+
+    def render_view(self, frame):
+        """The picture the student sees: the camera, or one of the images the
+        pipeline actually works on, so the processing is visible live."""
+        mode = getattr(self, "view", "camera")
+        if mode == "contrast":
+            return cv2.cvtColor(self.engine.detection_image(frame), cv2.COLOR_GRAY2BGR)
+        if mode == "texture":
+            return cv2.cvtColor(fast_lbp(self.engine.detection_image(frame)), cv2.COLOR_GRAY2BGR)
+        if mode == "votes":
+            g = self.engine.detection_image(frame)
+            view = (frame * 0.55).astype(np.uint8)
+            for x, y, w, h in self.engine.detector.run_haar(g):
+                cv2.rectangle(view, (x, y), (x + w, y + h), (255, 160, 60), 2, cv2.LINE_AA)
+                cv2.putText(view, "Haar", (x + 4, y + h - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 160, 60), 1, cv2.LINE_AA)
+            for x, y, w, h in self.engine.detector.run_lbp(g):
+                cv2.rectangle(view, (x, y), (x + w, y + h), (60, 170, 255), 2, cv2.LINE_AA)
+                cv2.putText(view, "LBP", (x + 4, y + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (60, 170, 255), 1, cv2.LINE_AA)
+            return view
+        return frame.copy()
+
     def preview_step(self, frame):
         """Recognise without recording anything (the 'preview' mode)."""
         if not hasattr(self, "_ptracker"):
@@ -246,7 +279,7 @@ class Worker:
             chip = self.engine.describe(frame, tr.face)
             m = self.engine.predict(chip)
             tr.observe(m)
-            s = self.labels.get(m.label) if m.ok else None
+            s = self.labels.get(tr.label)       # follow the vote, not the single frame
             out.append({"box": tr.face.box, "sources": tr.face.sources, "match": m, "student": s, "chip": chip,
                         "track": tr, "state": "verifying" if s else "unknown"})
         return out
@@ -278,9 +311,14 @@ class Worker:
 
     # ---------------------------------------------------------------- actions
     def train_async(self):
+        """Retrain in the background. A request that arrives while training is
+        running is remembered and run afterwards, so the model always ends up
+        matching the latest dataset/ (e.g. after several deletions in a row)."""
         if self.training:
+            self._retrain_pending = True
             return
         self.training = True
+        self._retrain_pending = False
 
         def job():
             from train import train_all
@@ -302,6 +340,8 @@ class Worker:
                 self.message = f"Training failed: {e}"
             finally:
                 self.training = False
+                if getattr(self, "_retrain_pending", False):
+                    self.train_async()
 
         threading.Thread(target=job, daemon=True).start()
 
@@ -366,7 +406,7 @@ def status():
     if w.reg and w.mode == "register":
         reg = {k: w.reg[k] for k in ("roll", "name", "saved", "target", "hint")}
     return jsonify({
-        "mode": w.mode, "fps": round(w.fps, 1), "camera_ok": w.camera_ok, "camera_on": w.camera_on,
+        "mode": w.mode, "fps": round(w.fps, 1), "view": getattr(w, "view", "camera"), "camera_ok": w.camera_ok, "camera_on": w.camera_on,
         "faces": w.faces, "roster": roster(), "training": w.training, "message": w.message,
         "model_ok": w.model_ok, "students": len(w.labels), "register": reg,
         "events": (w.session.events[-12:][::-1] if w.session else []),
@@ -386,6 +426,14 @@ def att_start():
 def att_stop():
     worker.stop_attendance()
     return jsonify(ok=True)
+
+
+@app.post("/api/view")
+def set_view():
+    v = (request.json or {}).get("view", "camera")
+    if v in Worker.VIEWS:
+        worker.view = v
+    return jsonify(view=getattr(worker, "view", "camera"))
 
 
 @app.post("/api/camera")
