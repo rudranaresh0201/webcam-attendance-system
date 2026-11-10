@@ -54,9 +54,12 @@
       <div class="side">
         <div class="card">
           <div class="big-count"><b id="kPresent">0</b><span>of <b id="kTotal">0</b> present</span></div>
+          <label class="check small-check"><input type="checkbox" id="showNames"> Show names on this screen</label>
+          <p class="welcome" id="welcome" hidden></p>
           <ul class="roster" id="roster"></ul>
+          <p class="muted small" id="privNote">Names are hidden so a projected screen doesn't show who is absent. The full list is under Records.</p>
         </div>
-        <div class="card">
+        <div class="card" id="feedCard">
           <h3>Arrivals</h3>
           <ul class="feed" id="feed"></ul>
         </div>
@@ -80,7 +83,7 @@
             <li data-l="0"><b>Crop and even out.</b> The face is cut out, resized to 200×200 and its contrast evened out, so a dim room and a bright room look alike.</li>
             <li data-l="1"><b>Describe the texture.</b> Each pixel is compared with its 8 neighbours: brighter or darker? Those 8 yes/no answers make a code for spots, edges and corners.</li>
             <li data-l="2"><b>Compare.</b> The face is split into an 8×8 grid and the codes in each square are counted. Each square is compared with the enrolled photos. Brighter squares differ more. Eyes and brows count most.</li>
-            <li data-l="3"><b>Decide.</b> It must be close to one student <i>and</i> clearly closer to them than to anyone else, in 5 of the last 8 frames. One bad frame (a blink, a glance down) doesn't reset it.</li>
+            <li data-l="3"><b>Decide.</b> It must be close to one student <i>and</i> clearly closer to them than to anyone else, including a hidden crowd of 192 faces of people who aren't in this class,, in 5 of the last 8 frames. One bad frame (a blink, a glance down) doesn't reset it.</li>
           </ol>
         </div>
         <div>

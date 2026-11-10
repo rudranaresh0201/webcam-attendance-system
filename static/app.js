@@ -66,11 +66,14 @@ function narrate(s) {
     if (f.dist > st.DIST_THRESHOLD)
       return ["no", "I can see a face, but I don't recognise it.",
         more + `The closest enrolled student is ${f.nearest}, but not close enough: a difference of ${f.dist.toFixed(2)} against a limit of ${st.DIST_THRESHOLD}.`];
+    if (f.runner_up === "crowd")
+      return ["no", "I can see a face, but I don't recognise it.",
+        more + `It's no closer to ${f.nearest} than to faces of people who aren't in this class (ratio ${f.ratio.toFixed(2)}, limit ${st.RATIO_THRESHOLD}), so I won't guess.`];
     return ["no", "I can see a face, but I'm not sure who it is.",
-      more + `It's close to ${f.nearest}, but almost as close to someone else (ratio ${f.ratio.toFixed(2)}, limit ${st.RATIO_THRESHOLD}), so I won't guess.`];
+      more + `It's close to ${f.nearest}, but almost as close to ${f.runner_up} (ratio ${f.ratio.toFixed(2)}, limit ${st.RATIO_THRESHOLD}), so I won't guess.`];
   }
   if (f.state === "verifying")
-    return ["wait", `This looks like ${f.name}.`, more + `Checking a few more frames to be sure: ${Math.min(f.streak, st.CONFIRM_FRAMES)} of ${st.CONFIRM_FRAMES}.` + (rec ? "" : " Press Start attendance to record it.")];
+    return ["wait", `Recognising ${f.name}…`, more + `Matched in ${Math.min(f.streak, st.CONFIRM_FRAMES)} of the ${st.CONFIRM_FRAMES} frames needed.` + (rec ? "" : " Press Start attendance to record it.")];
   if (f.state === "blink") return ["wait", `${f.name}, please blink.`, more + "This checks that it's a real person and not a photo."];
   if (f.state === "marked") {
     const row = s.roster.find((r) => r.roll === f.roll);
@@ -107,6 +110,17 @@ function render(s) {
   const present = s.roster.filter((r) => r.status === "Present").length;
   $("#kPresent").textContent = present;
   $("#kTotal").textContent = s.roster.length;
+  // private mode: on a projected screen, don't show who is absent
+  const names = showNames();
+  $("#roster").hidden = !names; $("#feedCard").hidden = !names; $("#privNote").hidden = names;
+  const last = s.events[0];
+  if (!names && last && last.time !== render.lastWelcome) {
+    render.lastWelcome = last.time;
+    $("#welcome").textContent = `Welcome, ${last.name}: marked present.`;
+    $("#welcome").hidden = false;
+    clearTimeout(render.wt); render.wt = setTimeout(() => ($("#welcome").hidden = true), 8000);
+  }
+  if (names) $("#welcome").hidden = true;
   const rk = JSON.stringify(s.roster);
   if (rk !== render.rk) {
     render.rk = rk;
@@ -127,8 +141,8 @@ function render(s) {
     <div>
       <div class="fr-head"><b>${esc(f.name || "Not recognised")}</b><span>closest: ${esc(f.nearest || "–")}</span></div>
       ${meter("How different from the closest student", f.dist, st.DIST_THRESHOLD, Math.max(0.8, f.dist), "lower = more alike")}
-      ${s.students > 1 ? meter("Closest compared with the runner-up", f.ratio, st.RATIO_THRESHOLD, 1.0, "lower = more certain")
-        : `<p class="muted small">Only one student is enrolled, so the "clearly better than the runner-up" check can't run yet. Enrol a second person for full protection against strangers.</p>`}
+      ${f.ratio > 0 ? meter(`Closest compared with the next face (${f.runner_up === "crowd" ? "someone outside the class" : esc(f.runner_up)})`, f.ratio, st.RATIO_THRESHOLD, Math.max(1.0, f.ratio), "lower = more certain")
+        : `<p class="muted small">Nothing to compare against yet, so only the distance limit applies.</p>`}
     </div>`).join("") : `<p class="muted">${s.model_ok ? "When a face is in view, its numbers appear here." : "Enrol someone to see how matching works."}</p>`;
 
   if (tab === "live" && !render.loading) {
@@ -152,6 +166,10 @@ function render(s) {
   render.wasReg = active;
   if (s.message && s.message !== lastMsg) { lastMsg = s.message; toast(s.message); }
 }
+
+function showNames() { try { return localStorage.getItem("showNames") === "1"; } catch { return false; } }
+$("#showNames").checked = showNames();
+$("#showNames").onchange = (e) => { try { localStorage.setItem("showNames", e.target.checked ? "1" : "0"); } catch {} };
 
 $$("#steps li").forEach((li) => {
   const layer = $$(".layer")[+li.dataset.l];

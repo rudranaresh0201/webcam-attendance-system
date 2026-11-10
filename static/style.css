@@ -93,6 +93,8 @@ label.check { display: flex; gap: 10px; align-items: center; color: var(--ink); 
 .feed time { color: var(--ink-3); margin-right: 8px; font-variant-numeric: tabular-nums; }
 @keyframes drop { from { opacity: 0; transform: translateY(-6px); } }
 .empty-note { color: var(--ink-3); font-size: 14px; padding: 6px 0; }
+.small-check { margin: 0 0 10px; font-size: 13.5px; color: var(--ink-2); }
+.welcome { font-size: 17px; font-weight: 600; color: var(--green); margin: 6px 0; animation: drop .4s var(--ease); }
 
 /* ------------------------------------------------------------- how it decided: 3D exploded layers */
 .how-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }

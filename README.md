@@ -82,7 +82,8 @@ re-run on the same day keeps earlier Present marks.
 | normalisation | 200×200 chip; CLAHE, or Tan–Triggs (γ, DoG, equalisation) | `engines.py` |
 | **features** | our NumPy LBP: uniform (59 bins), radii 1 and 2, 8×8 grid; optional LTP | `lbp.py` |
 | **matching** | χ² with **learned per-cell weights**, minimum over each person's templates | `lbp.py`, `recognizer.py` |
-| **open-set decision** | d₁ ≤ τ_d **and ratio test** d₁/d₂ ≤ τ_r | `recognizer.py` |
+| **open-set decision** | d₁ ≤ 0.50 **and ratio test** d₁/d₂ ≤ 0.84, where the runner-up can be another student **or a hidden crowd of 192 non-students** | `recognizer.py` |
+| **occlusion** | mirror enrolment + trimmed χ² (ignore the worst 20% of cells): masked faces go from never recognised to recognised | `recognizer.py`, `lbp.py` |
 | temporal | IoU tracker; credited when accepted in **5 of the last 8 frames**; optional **blink** | `tracker.py`, `attendance.py` |
 | output | CSV per day | `attendance.py` |
 
@@ -92,7 +93,8 @@ OpenCV's LBPH is kept as a baseline (`RECOGNIZER = "lbph"` in `config.py`).
 
 ```bash
 python benchmark.py --lfw path/to/lfw_funneled --yale path/to/CroppedYale
-python tests/smoke_test.py --lfw path/to/lfw_funneled
+python tests/smoke_test.py --lfw path/to/lfw_funneled             # pipeline, no camera
+python tests/e2e_test.py --lfw path/to/lfw_funneled --chrome /usr/bin/google-chrome   # app + browser (pip install playwright)
 ```
 
 LFW can be fetched with `sklearn.datasets.fetch_lfw_people(data_home=...)`. The
@@ -127,4 +129,5 @@ and attendance sheets.
 * Faces smaller than 80×80 px are ignored, so a large lecture hall needs a
   higher-resolution camera.
 * The blink check stops printed photos but not a video replay.
-* With only one student enrolled, the runner-up test can't run. Enrol at least two, and tune on three or more.
+* On a projected screen, keep **Show names** off: the Live screen then shows only the count and "Welcome, <name>".
+* Students are missed more often when they look down or are seen in very different light from enrolment. Re-enrol in the room's usual light.

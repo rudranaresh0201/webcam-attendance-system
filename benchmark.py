@@ -602,7 +602,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--lfw", type=Path, default=Path.home() / "datasets/lfw_home/lfw_funneled")
     ap.add_argument("--yale", type=Path, default=Path.home() / "datasets/yale_src/CroppedYale")
-    ap.add_argument("--only", nargs="*", default=["detection", "weights", "lfw", "yale", "figures"])
+    ap.add_argument("--only", nargs="*", default=["detection", "weights", "lfw", "yale", "cohort", "robust", "figures"])
     args = ap.parse_args()
     out, figs = config.RESULTS_DIR, config.FIGURES_DIR
     out.mkdir(parents=True, exist_ok=True)
@@ -622,6 +622,11 @@ def main():
         np.savez(CACHE / "curves.npz", **{k: np.stack(v) for k, v in curves.items()})
     if "yale" in args.only:
         exp_yale(args.yale, engine, out)
+    if "cohort" in args.only:
+        make_cohort_assets(engine)
+        exp_cohort(args.lfw, engine, out)
+    if "robust" in args.only:
+        exp_robust(args.lfw, engine, out)
     if "figures" in args.only:
         det = json.loads((out / "detection.json").read_text())
         fig_detection(det, figs)
@@ -633,6 +638,168 @@ def main():
         fig_weights(engine, args.lfw, figs)
         fig_pipeline(engine, args.lfw, figs)
         print(f"figures -> {figs}")
+
+
+
+# =============================================================================== background cohort
+COHORT_PER_PERSON = 2
+
+
+def cohort_path(desc, illumination):
+    return config.WEIGHTS_DIR / f"cohort_{desc.signature}_{illumination}.npz"
+
+
+def make_cohort_assets(engine):
+    """Texture histograms (not photos) of 2 images each of the 96 LFW people used for
+    weight learning - never used in any test. They sit silently in the gallery as
+    'people who are not in this class' (recognizer.OpenSetLBP)."""
+    z = np.load(CACHE / "lfw_weights.npz")
+    lc = z["labels"]
+    keep = np.concatenate([np.flatnonzero(lc == p)[:COHORT_PER_PERSON] for p in np.unique(lc)])
+    for ternary in (False, True):
+        for how in ("clahe", "tantriggs", "none"):
+            kw = {"scales": ((8, 1), (8, 2)), "ternary": ternary}
+            desc = lbp.LBPDescriptor(**kw)
+            F = features(illum(z["chips"][keep], how, engine._clahe), kw).astype(np.float16)
+            np.savez_compressed(cohort_path(desc, how), features=F, people=lc[keep].astype(np.int32))
+            print(f"cohort {desc.signature} {how}: {len(F)} faces, {cohort_path(desc, how).stat().st_size / 1e6:.1f} MB")
+
+
+def exp_cohort(lfw_root, engine, out):
+    """Strangers accepted / students missed with only K students enrolled, with and
+    without the background cohort (LFW-62 people, 15 enrolment photos, 5 test photos)."""
+    chips, labels, *_ = lfw_chips(engine, lfw_people(lfw_root, 20, max_images=20), "all62_20")
+    kw = {"scales": ((8, 1), (8, 2))}
+    w = weights_for(kw)
+    F = features(illum(chips, "clahe", engine._clahe), kw)
+    D = distance_matrix(F, w)
+    c = np.load(cohort_path(lbp.LBPDescriptor(**kw), "clahe"))
+    Dc = cross_distance(F, c["features"].astype(np.float32), w)
+    Mc = np.stack([Dc[:, c["people"] == p].min(1) for p in np.unique(c["people"])], 1)
+    td, tr = config.DIST_THRESHOLD, config.RATIO_THRESHOLD
+    rng = np.random.default_rng(0)
+    res = {"dist_threshold": td, "ratio_threshold": tr, "cohort_faces": int(len(c["people"])), "rows": []}
+    for K in (1, 2, 5, 10):
+        trials = [rng.choice(labels.max() + 1, K, replace=False) for _ in range(40)]
+        for with_cohort in (False, True):
+            far, frr = [], []
+            for studs in trials:
+                enrol = np.isin(labels, studs) & (np.arange(len(labels)) % 20 < 15)
+                M = np.stack([D[:, enrol & (labels == s)].min(1) for s in studs], 1)
+                if with_cohort:
+                    M = np.concatenate([M, Mc], 1)
+                best = M.argmin(1)
+                o = np.sort(M, 1)
+                ratio = o[:, 0] / o[:, 1] if o.shape[1] > 1 else np.zeros(len(o))
+                ok = (best < K) & (o[:, 0] <= td) & (ratio <= tr)
+                stranger, gen = ~np.isin(labels, studs), np.isin(labels, studs) & ~enrol
+                far.append(ok[stranger].mean())
+                frr.append(1 - (ok[gen] & (studs[np.minimum(best[gen], K - 1)] == labels[gen])).mean())
+            row = {"K": K, "cohort": with_cohort, "strangers_accepted": float(np.mean(far)),
+                   "students_missed": float(np.mean(frr))}
+            res["rows"].append(row)
+            print(f"  K={K:2d} cohort={with_cohort!s:5}: strangers accepted {row['strangers_accepted']:.1%}  "
+                  f"students missed {row['students_missed']:.1%}")
+    (out / "cohort.json").write_text(json.dumps(res, indent=2))
+    return res
+
+
+
+# =============================================================================== robustness: mirror enrolment, trimmed chi2, occlusion
+OCCLUSIONS = {
+    "none": None,
+    "eye bar (sunglasses)": (0.28, 0.46, 0.08, 0.92),       # rows y0..y1, cols x0..x1 as fractions
+    "lower face (mask)": (0.62, 1.00, 0.10, 0.90),
+    "hand over cheek": (0.45, 0.85, 0.05, 0.40),
+}
+
+
+def occlude(chip, box):
+    if box is None:
+        return chip
+    h, w = chip.shape
+    out = chip.copy()
+    y0, y1, x0, x1 = box
+    out[int(y0 * h):int(y1 * h), int(x0 * w):int(x1 * w)] = 90       # flat grey: no texture there
+    return out
+
+
+def trimmed_distance(cell_d, w, trim):
+    """Weighted chi2 ignoring the worst `trim` share of cells (by weighted contribution):
+    an occluded or badly lit region can only spoil a bounded part of the comparison."""
+    contrib = cell_d * w
+    if trim <= 0:
+        return contrib.sum(-1) / w.sum()
+    k = int(round(cell_d.shape[-1] * (1 - trim)))
+    idx = np.argsort(contrib, -1)[..., :k]
+    return np.take_along_axis(contrib, idx, -1).sum(-1) / np.take_along_axis(np.broadcast_to(w, contrib.shape), idx, -1).sum(-1)
+
+
+def _robust_rows(args):
+    rows, trims = args
+    Q, G, w = _G["Q"], _G["G"], _G["w"]
+    out = np.zeros((len(trims), len(rows), len(G)), np.float32)
+    for n, i in enumerate(rows):
+        cd = lbp.chi2_cells(Q[i], G)
+        for t, trim in enumerate(trims):
+            out[t, n] = trimmed_distance(cd, w, trim)
+    return out
+
+
+def _robust_init(Q, G, w):
+    _G["Q"], _G["G"], _G["w"] = Q, G, w
+
+
+def cross_trimmed(Q, G, w, trims, workers=12):
+    parts = np.array_split(np.arange(len(Q)), workers * 3)
+    with ProcessPoolExecutor(workers, initializer=_robust_init, initargs=(Q, G, w)) as ex:
+        return np.concatenate(list(ex.map(_robust_rows, [(p, trims) for p in parts])), 1)
+
+
+def exp_robust(lfw_root, engine, out, trims=(0.0, 0.1, 0.2, 0.3)):
+    """Students enrolled from 15 photos each (+ optional mirrored copies), the background
+    crowd in the gallery, probes optionally occluded. Reports strangers accepted and
+    students missed per frame, averaged over random classes of K = 1, 5, 10 students."""
+    chips, labels, *_ = lfw_chips(engine, lfw_people(lfw_root, 20, max_images=20), "all62_20")
+    kw = {"scales": ((8, 1), (8, 2))}
+    w = weights_for(kw)
+    c = illum(chips, "clahe", engine._clahe)
+    G = features(c, kw)
+    Gm = features([cv2.flip(x, 1) for x in c], kw)                      # mirrored enrolment
+    coh = np.load(cohort_path(lbp.LBPDescriptor(**kw), "clahe"))
+    Fc, pc = coh["features"].astype(np.float32), coh["people"]
+    enrolled = np.arange(len(labels)) % 20 < 15
+    td, tr = config.DIST_THRESHOLD, config.RATIO_THRESHOLD
+    rng = np.random.default_rng(0)
+    classes = [rng.choice(labels.max() + 1, K, replace=False) for K in (1, 5, 10) for _ in range(30)]
+    res = {"thresholds": [td, tr], "rows": []}
+    for occ_name, box in OCCLUSIONS.items():
+        Q = features([occlude(x, box) for x in chips], kw) if box else None
+        Q = features(illum([occlude(x, box) for x in chips], "clahe", engine._clahe), kw) if box else G
+        D = cross_trimmed(Q, G, w, trims)            # (T, N, N)
+        Dm = cross_trimmed(Q, Gm, w, trims)
+        Dc = cross_trimmed(Q, Fc, w, trims)          # (T, N, 192)
+        for ti, trim in enumerate(trims):
+            Mc = np.stack([Dc[ti][:, pc == p].min(1) for p in np.unique(pc)], 1)
+            for mirror in (False, True):
+                Dg = np.minimum(D[ti], Dm[ti]) if mirror else D[ti]
+                far, frr = [], []
+                for studs in classes:
+                    K = len(studs)
+                    M = np.stack([Dg[:, enrolled & (labels == s)].min(1) for s in studs] + [Mc[:, j] for j in range(Mc.shape[1])], 1)
+                    best = M.argmin(1)
+                    o = np.sort(M, 1)
+                    ok = (best < K) & (o[:, 0] <= td) & (o[:, 0] / o[:, 1] <= tr)
+                    stranger, gen = ~np.isin(labels, studs), np.isin(labels, studs) & ~enrolled
+                    far.append(ok[stranger].mean())
+                    frr.append(1 - (ok[gen] & (studs[np.minimum(best[gen], K - 1)] == labels[gen])).mean())
+                row = {"occlusion": occ_name, "trim": trim, "mirror": mirror,
+                       "strangers_accepted": float(np.mean(far)), "students_missed": float(np.mean(frr))}
+                res["rows"].append(row)
+                print(f"  {occ_name:22s} trim {trim:.1f} mirror {mirror!s:5}: strangers {row['strangers_accepted']:5.1%}  "
+                      f"students missed {row['students_missed']:5.1%}")
+    (out / "robust.json").write_text(json.dumps(res, indent=2))
+    return res
 
 
 if __name__ == "__main__":

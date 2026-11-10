@@ -55,7 +55,28 @@ def default_weights(desc):
     return np.ones(desc.n_cells, np.float32)
 
 
+CROWD = -2     # Match.second when the runner-up is a background face, not a student
+
+
+def load_cohort(desc):
+    """Background faces (texture histograms of LFW people who are never students and
+    never in any test; see benchmark.make_cohort_assets). Returns (features, person ids)
+    or (None, None) when switched off or not available for these settings."""
+    if not config.USE_COHORT:
+        return None, None
+    path = config.WEIGHTS_DIR / f"cohort_{desc.signature}_{config.ILLUMINATION}.npz"
+    if not path.exists():
+        return None, None
+    z = np.load(path)
+    return z["features"].astype(np.float32), z["people"]
+
+
 class OpenSetLBP:
+    """Open-set matcher. The gallery is the enrolled students PLUS a silent background
+    crowd: a student is accepted only if they are the closest identity of all, close
+    enough (d1 <= DIST_THRESHOLD) and clearly closer than the runner-up, student or
+    crowd (d1 / d2 <= RATIO_THRESHOLD). Without the crowd, a class of one student would
+    accept most strangers: every face is 'closest' to the only student (RESULTS.md 2d)."""
     kind = "openset"
 
     def __init__(self, dist_threshold=None, ratio_threshold=None, weights=None):
@@ -65,6 +86,11 @@ class OpenSetLBP:
         self.weights = default_weights(self.desc) if weights is None else weights
         self.features = np.zeros((0, self.desc.n_cells, 1), np.float32)
         self.labels = np.zeros(0, np.int32)
+        self.cohort, self.cohort_people = load_cohort(self.desc)
+
+    @property
+    def has_cohort(self):
+        return self.cohort is not None
 
     @property
     def threshold(self):
@@ -74,13 +100,19 @@ class OpenSetLBP:
         return np.stack([self.desc(c) for c in chips]) if len(chips) else self.features[:0]
 
     def train(self, chips, label_ids):
+        labels = np.asarray(label_ids, np.int32)
+        if config.MIRROR_ENROL and len(chips):
+            # faces are nearly symmetric: each enrolment photo also counts mirrored,
+            # which covers the head turned the other way (RESULTS.md, robustness)
+            chips = list(chips) + [cv2.flip(c, 1) for c in chips]
+            labels = np.concatenate([labels, labels])
         self.features = self.features_of(chips)
-        self.labels = np.asarray(label_ids, np.int32)
+        self.labels = labels
 
     def identity_distances(self, feature):
         """(ids, per-identity min distance, index of best template per identity)"""
         cell_d = lbp.chi2_cells(feature, self.features)
-        d = lbp.weighted_distance(cell_d, self.weights)
+        d = lbp.weighted_distance(cell_d, self.weights, config.TRIM_CELLS)
         ids = np.unique(self.labels)
         best_idx = np.array([np.flatnonzero(self.labels == i)[np.argmin(d[self.labels == i])] for i in ids])
         return ids, d[best_idx], best_idx, cell_d
@@ -88,14 +120,17 @@ class OpenSetLBP:
     def predict(self, chip):
         if not len(self.labels):
             return Match(-1, float("inf"), False)
-        ids, d, best_idx, cell_d = self.identity_distances(self.desc(chip))
+        feature = self.desc(chip)
+        ids, d, best_idx, cell_d = self.identity_distances(feature)
         order = np.argsort(d)
         d1 = float(d[order[0]])
-        if len(ids) > 1:
-            d2 = float(d[order[1]])
-            ratio, second = d1 / (d2 + 1e-9), int(ids[order[1]])
-        else:
-            ratio, second = 0.0, -1      # one student: only the distance test applies
+        # runner-up: the next student, or the closest background face, whichever is nearer
+        d2, second = (float(d[order[1]]), int(ids[order[1]])) if len(ids) > 1 else (float("inf"), -1)
+        if self.has_cohort:
+            dc = lbp.weighted_distance(lbp.chi2_cells(feature, self.cohort), self.weights, config.TRIM_CELLS)
+            if dc.min() < d2:
+                d2, second = float(dc.min()), CROWD
+        ratio = d1 / d2 if np.isfinite(d2) else 0.0      # 0 = nothing to compare with
         ok = d1 <= self.dist_threshold and ratio <= self.ratio_threshold
         return Match(int(ids[order[0]]), d1, ok, ratio, second, cell_d[best_idx[order[0]]])
 

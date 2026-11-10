@@ -156,9 +156,20 @@ def chi2_cells(query, gallery):
     return (num / den).sum(-1)
 
 
-def weighted_distance(cell_d, weights):
-    """Weighted mean over cells: (..., C) -> (...). Weights need not sum to 1."""
-    return cell_d @ (weights / weights.sum())
+def weighted_distance(cell_d, weights, trim=0.0):
+    """Weighted mean over cells: (..., C) -> (...). Weights need not sum to 1.
+
+    trim > 0 drops the worst-matching share of cells (largest weighted contribution)
+    before averaging - a trimmed mean. A hand, a mask or sunglasses changes the texture
+    of only part of the grid, so it can then only spoil a bounded part of the distance
+    (RESULTS.md: masked faces go from never recognised to recognised)."""
+    if trim <= 0:
+        return cell_d @ (weights / weights.sum())
+    contrib = cell_d * weights
+    k = max(1, int(round(cell_d.shape[-1] * (1 - trim))))
+    keep = np.argpartition(contrib, k - 1, axis=-1)[..., :k]
+    kept = np.take_along_axis(contrib, keep, -1).sum(-1)
+    return kept / np.take(weights, keep).sum(-1)
 
 
 def learn_cell_weights(features, labels, pairs=4000, seed=0):

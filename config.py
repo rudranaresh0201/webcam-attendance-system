@@ -3,12 +3,16 @@
 Values marked (benchmark) were chosen from the experiments in benchmark.py;
 see docs/RESULTS.md for the numbers behind them.
 """
+import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
-DATASET_DIR = BASE_DIR / "dataset"      # dataset/<roll>_<name>/0.png ... 29.png
-MODELS_DIR = BASE_DIR / "models"
-RECORDS_DIR = BASE_DIR / "records"      # records/attendance_YYYY-MM-DD.csv
+# Personal data (face photos, model, attendance sheets) lives under DATA_DIR. The
+# end-to-end test points FACEROLL_DATA at a temporary folder so it never touches yours.
+DATA_DIR = Path(os.environ.get("FACEROLL_DATA", BASE_DIR))
+DATASET_DIR = DATA_DIR / "dataset"      # dataset/<roll>_<name>/0.png ... 29.png
+MODELS_DIR = DATA_DIR / "models"
+RECORDS_DIR = DATA_DIR / "records"      # records/attendance_YYYY-MM-DD.csv
 DOCS_DIR = BASE_DIR / "docs"
 FIGURES_DIR = DOCS_DIR / "figures"
 RESULTS_DIR = DOCS_DIR / "results"
@@ -18,7 +22,8 @@ OPENSET_MODEL_PATH = MODELS_DIR / "openset_lbp.npz" # our recognizer's gallery
 LABELS_PATH = MODELS_DIR / "labels.json"            # {int_id: {"roll": ..., "name": ...}}
 
 # Camera
-CAMERA_INDEX = 0
+CAMERA_INDEX = os.environ.get("FACEROLL_CAMERA", 0)   # webcam number, or a video file path
+CAMERA_INDEX = int(CAMERA_INDEX) if str(CAMERA_INDEX).isdigit() else CAMERA_INDEX
 FRAME_WIDTH = 640
 MIRROR = True                    # flip horizontally so the preview behaves like a mirror
 
@@ -54,7 +59,10 @@ LBP_TERNARY = False              # Local Ternary Patterns instead of LBP
 LTP_T = 5                        # LTP tolerance in gray levels
 CELL_WEIGHTS = "learned"         # "learned" (assets/) or "uniform"
 DIST_THRESHOLD = 0.50            # loose sanity bound; the ratio test does the real work (docs/RESULTS.md §2c)
-RATIO_THRESHOLD = 0.88           # d(best) / d(runner-up identity) (benchmark: LFW, FAR <= 1%)
+MIRROR_ENROL = True              # also enrol every photo mirrored (covers turning the other way)
+TRIM_CELLS = 0.2                 # ignore the worst-matching 20% of grid cells (hands, masks, glasses)
+USE_COHORT = True                # silent background crowd of non-students (assets/cohort_*.npz)
+RATIO_THRESHOLD = 0.84           # best / runner-up (student or crowd); RESULTS.md 2e
 
 # OpenCV LBPH baseline
 LBPH_RADIUS = 1

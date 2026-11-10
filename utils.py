@@ -11,6 +11,11 @@ GREEN, RED, YELLOW, WHITE = (0, 255, 0), (0, 0, 255), (0, 255, 255), (255, 255, 
 
 def open_camera():
     # DirectShow opens much faster than the default backend on Windows
+    if isinstance(config.CAMERA_INDEX, str):            # a video file standing in for the webcam
+        cap = cv2.VideoCapture(config.CAMERA_INDEX)
+        if not cap.isOpened():
+            raise RuntimeError(f"Could not open video {config.CAMERA_INDEX}.")
+        return cap
     backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
     cap = cv2.VideoCapture(config.CAMERA_INDEX, backend)
     if not cap.isOpened():

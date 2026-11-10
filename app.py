@@ -24,7 +24,7 @@ import lbp
 import utils
 from attendance import AttendanceSession, csv_path_for_today, load_present
 from engines import FaceEngine
-from recognizer import load_labels
+from recognizer import CROWD, load_labels
 
 ROOT = Path(__file__).resolve().parent
 SETTINGS_PATH = config.MODELS_DIR / "settings.json"
@@ -187,7 +187,9 @@ class Worker:
                 cap.release()
                 cap = None
                 continue
-            frame = utils.prepare_frame(frame)
+            frame = utils.prepare_frame(frame, mirror=False if isinstance(config.CAMERA_INDEX, str) else None)
+            if isinstance(config.CAMERA_INDEX, str):
+                time.sleep(1 / 15)              # play a video file at roughly webcam speed
             try:
                 with self.lock:
                     view = self.process(frame)
@@ -230,6 +232,8 @@ class Worker:
                 "state": st, "sources": r["sources"], "box": list(r["box"]),
                 "name": s["name"] if s else None, "roll": s["roll"] if s else None,
                 "nearest": nearest["name"] if nearest else None,
+                "runner_up": None if m is None else ("crowd" if m.second == CROWD
+                                                     else self.labels.get(m.second, {}).get("name")),
                 "dist": round(m.score, 3) if m else None,
                 "ratio": round(m.ratio, 3) if m else None,
                 "streak": r["track"].streak if r["track"] else 0,
@@ -411,7 +415,8 @@ def status():
         "model_ok": w.model_ok, "students": len(w.labels), "register": reg,
         "events": (w.session.events[-12:][::-1] if w.session else []),
         "unknown_seen": len(w.session.unknown_tracks) if w.session else 0,
-        "recognizer": w.engine.recognizer.kind, "settings": current_settings(),
+        "recognizer": w.engine.recognizer.kind,
+        "cohort": getattr(w.engine.recognizer, "has_cohort", False), "settings": current_settings(),
         "date": csv_path_for_today().stem.replace("attendance_", ""),
     })
 

@@ -112,6 +112,57 @@ once three or more students are enrolled.
 
 ![FAR vs FRR](figures/far_frr_all62_20.png)
 
+### 2d. Small classes: the background crowd
+
+The ratio test needs a runner-up. With **one** student enrolled, every face's closest
+student is that student, so only the distance limit stands in the way. With few
+students the runner-up is often far away. Measured on LFW-62 (15 enrolment photos
+per student, 40 random classes per size, τ_d = 0.50, τ_r = 0.88):
+
+| students enrolled | strangers accepted, no crowd | **with crowd** | students missed, no crowd | with crowd |
+|---|---|---|---|---|
+| 1 | **55.5%** | **0.3%** | 5.0% | 53.3% |
+| 2 | 22.9% | 0.5% | 20.7% | 61.3% |
+| 5 | 7.0% | 0.7% | 40.8% | 59.2% |
+| 10 | 3.9% | 1.1% | 50.6% | 59.8% |
+
+The **crowd** is 192 faces (2 each of the 96 weight-learning people, never tested on),
+kept silently in the gallery as texture histograms. No photos are stored. A face is
+accepted only if a student beats every crowd face *and* every other student by the
+ratio. This is the cohort / background-model idea from speaker verification.
+
+### 2e. Robustness: occlusion, mirror enrolment, trimmed χ², final limit
+
+Probes are occluded with flat grey regions: an eye bar (sunglasses), the lower face
+(a mask), and a hand over one cheek. The crowd is in the gallery. Rows are per
+frame, averaged over classes of 1, 5 and 10 students:
+
+| probe | baseline: students missed | **mirror enrolment + trim 20%** | strangers accepted |
+|---|---|---|---|
+| unoccluded | 56.6% | **52.8%** | 0.5% |
+| eye bar | 92.5% | **65.4%** | 0.7% |
+| mask (lower face) | **100%** | **62.1%** | 0.9% |
+| hand on cheek | 76.7% | **55.9%** | 0.4% |
+
+*Trimmed χ²* ignores the worst-matching 20% of grid cells, so an occluder can only
+spoil a bounded part of the distance. *Mirror enrolment* adds each enrolment photo
+flipped. Five extra shifted/scaled crops per photo gained only 2 points, so they
+were not adopted.
+
+**Final runner-up limit.** A live end-to-end test found one stranger photo whose ratio
+wobbled between 0.85 and 0.89 across frames, so the 5-of-8 vote passed at 0.88.
+Sweeping the limit with the full pipeline (classes of 1–30 students):
+
+| τ_r | strangers accepted per frame | students missed per frame (LFW) |
+|---|---|---|
+| 0.88 | 0.22–0.74% | 56% |
+| **0.84** | **0.02–0.12%** | 72% |
+| 0.80 | ≤ 0.03% | 83% |
+
+The shipped value is **0.84**. "Students missed" here compares news photos taken
+years apart. A student enrolled this week on the same webcam scores about 0.7, well
+inside the limit.
+
 ## 3. Recognition under lighting: Extended Yale B
 
 Gallery: subset 1 only (7 near-frontal-light images per person). Probes: subsets
@@ -134,14 +185,25 @@ detection and recognition. Under strong side light, switch to **Tan–Triggs + L
 in Controls. That trades a few points on LFW-like variation for a very large gain
 on shadows.
 
-## 4. End-to-end smoke test (`tests/smoke_test.py`)
+## 4. Tests
 
-Four LFW people are enrolled from their first 25 photos, then the attendance
-session is driven with photos the model has never seen:
+**`tests/smoke_test.py`** (no camera, no browser). Four LFW people are enrolled from
+25 photos each. Every probe photo becomes an 8-frame clip with webcam-like jitter
+(a few pixels of movement, brightness flicker, sensor noise) and is fed to the real
+`AttendanceSession`:
 
-* **4 of 4** enrolled people credited present (each from one of their first held-out photos)
-* **0** credits from 50 photos of 5 people who were not enrolled
-* the CSV has one row per student
+* students: all 4 credited; 12 of 40 single-photo clips of *unseen* photos (30%)
+* strangers, 4 students enrolled: **0 of 80** clips credited
+* strangers, **1** student enrolled: **0 of 128** clips credited
+
+**`tests/e2e_test.py`** (the real app in a real browser; a video file stands in for the
+webcam and a temporary folder for the data). 16 checks, all passing:
+
+* run 1: enrol 2 students by uploading photos → start attendance → 40 s of video of
+  4 other people → **nobody marked present**, register says both Absent
+* run 2: video of the 2 students (photos never enrolled) → **both marked present in
+  25 s** → private mode hides names and shows "Welcome, …" → view switch → Finish
+  and save → Records table → CSV download
 
 ## 5. Live
 
