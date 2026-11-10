@@ -101,7 +101,7 @@ def spatial_histogram(codes, bins, grid=(8, 8)):
     """(gx*gy, bins) array: a normalised histogram of codes in each grid cell."""
     gx, gy = grid
     cell = _cell_index(codes.shape[0], codes.shape[1], gx, gy)
-    flat = np.bincount((cell * bins + codes).ravel(), minlength=gx * gy * bins)
+    flat = np.bincount((cell * bins + codes).ravel().astype(np.intp), minlength=gx * gy * bins)  # intp: also on 32-bit wasm
     hist = flat.reshape(gx * gy, bins).astype(np.float32)
     hist /= hist.sum(1, keepdims=True) + 1e-9
     return hist

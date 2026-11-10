@@ -39,6 +39,12 @@ def iou(a, b):
     return inter / union if union else 0.0
 
 
+def _cascade(name):
+    """Bundled copy in cascades/ (also used by the in-browser version), else OpenCV's own."""
+    local = CASCADE_DIR / name
+    return local if local.exists() else Path(cv2.data.haarcascades) / name
+
+
 def _load(path):
     c = cv2.CascadeClassifier(str(path))
     if c.empty():
@@ -53,9 +59,9 @@ class Detector:
         self.mode = mode or config.DETECTOR
         if self.mode not in self.MODES:
             raise ValueError(f"DETECTOR must be one of {self.MODES}")
-        self.haar = _load(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        self.haar = _load(_cascade("haarcascade_frontalface_default.xml"))
         self.lbp = _load(CASCADE_DIR / "lbpcascade_frontalface_improved.xml")
-        self.eye = _load(cv2.data.haarcascades + "haarcascade_eye.xml")
+        self.eye = _load(_cascade("haarcascade_eye.xml"))
 
     # ------------------------------------------------------------------ single cascades
     def _run(self, cascade, gray, min_neighbors):
