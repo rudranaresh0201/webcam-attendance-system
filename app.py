@@ -9,6 +9,7 @@ One background thread owns the webcam and runs the same pipeline as the CLI scri
   /api/...          JSON for status, registration, training, students, records, settings
 """
 import json
+import re
 import shutil
 import tempfile
 import threading
@@ -539,8 +540,18 @@ def students():
     return jsonify(out)
 
 
+ROLL_RE = re.compile(r"[A-Za-z0-9-]+")     # same rule as enrolment (_student_args)
+
+
+def _valid_roll(roll):
+    """A roll from the URL goes into a glob pattern; '*' or '?' would match other students."""
+    if not ROLL_RE.fullmatch(roll):
+        abort(404)
+
+
 @app.get("/api/students/<roll>/photo")
 def student_photo(roll):
+    _valid_roll(roll)
     d = next(iter(config.DATASET_DIR.glob(f"{roll}_*")), None) if config.DATASET_DIR.exists() else None
     files = utils.image_files(d) if d else []
     if not files:
@@ -551,6 +562,7 @@ def student_photo(roll):
 
 @app.delete("/api/students/<roll>")
 def student_delete(roll):
+    _valid_roll(roll)
     for p in config.DATASET_DIR.glob(f"{roll}_*"):
         shutil.rmtree(p)
     if utils.student_dirs():
