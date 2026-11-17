@@ -129,6 +129,16 @@ function render(s) {
       <div><b>${esc(r.name)}</b><span class="r">${esc(r.roll)}${r.time ? " · " + esc(r.time) : ""}</span></div>
       <span class="tag ${r.status}">${r.status}</span></li>`).join("") : `<li class="empty-note">Nobody enrolled yet.</li>`;
   }
+  const nk = JSON.stringify(s.new_today || []);
+  if (nk !== render.nk) {
+    render.nk = nk;
+    const nt = s.new_today || [];
+    $("#kNew").textContent = nt.length;
+    $("#newList").innerHTML = nt.length ? nt.map((r) => `
+      <li><img class="avatar" src="/api/students/${encodeURIComponent(r.roll)}/photo" alt="" onerror="this.style.visibility='hidden'">
+      <div><b>${esc(r.name)}</b><span class="r">${esc(r.roll)}${r.trained ? "" : " · press Retrain to learn"}</span></div></li>`).join("")
+      : `<li class="empty-note">Nobody new today. Enrol students in the Enrol tab.</li>`;
+  }
   const fk = JSON.stringify(s.events);
   if (fk !== render.fk) {
     render.fk = fk;
@@ -208,16 +218,26 @@ $("#btnUpload").onclick = async () => {
 };
 
 // ------------------------------------------------------------------ students
+let stuFilter = "all";
+$$("#stuFilter button").forEach((b) => (b.onclick = () => {
+  stuFilter = b.dataset.f; $$("#stuFilter button").forEach((x) => x.classList.toggle("on", x === b)); loadStudents();
+}));
+const fmtDay = (d) => d ? new Date(d + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "";
+
 async function loadStudents() {
-  const list = await api("/api/students");
+  const all = await api("/api/students");
+  const nNew = all.filter((s) => s.new_today).length;
+  $("#stuNewCount").textContent = `(${nNew})`;
+  const list = stuFilter === "new" ? all.filter((s) => s.new_today) : all;
   const ph = (r, i) => `/api/students/${encodeURIComponent(r)}/photo?i=${i}`;
   $("#studentCards").innerHTML = list.length ? list.map((s) => `
     <div class="flip" tabindex="0">
-      <div class="front"><img src="${ph(s.roll, 0)}" alt="">
-        <div class="body"><b>${esc(s.name)}</b><span>${esc(s.roll)} · ${s.images} photos${s.trained ? "" : " · not learned yet"}</span></div></div>
+      <div class="front"><img src="${ph(s.roll, 0)}" alt="">${s.new_today ? `<em class="newbadge">New today</em>` : ""}
+        <div class="body"><b>${esc(s.name)}</b><span>${esc(s.roll)} · ${s.images} photos${s.trained ? "" : " · not learned yet"}</span>
+        <span>Enrolled ${s.new_today ? "today" : esc(fmtDay(s.enrolled))}</span></div></div>
       <div class="back"><div class="thumbs">${[3, 7, 11, 15, 19, 23, 26, 28, 29].filter((i) => i < s.images).map((i) => `<img loading="lazy" src="${ph(s.roll, i)}" alt="">`).join("")}</div>
         <div class="row"><span>${esc(s.name)}</span><button data-del="${esc(s.roll)}">Remove</button></div></div>
-    </div>`).join("") : `<div class="card empty">Nobody enrolled yet.</div>`;
+    </div>`).join("") : `<div class="card empty">${stuFilter === "new" && all.length ? "Nobody enrolled today." : "Nobody enrolled yet."}</div>`;
   $$(".flip").forEach((c) => (c.onclick = (e) => { if (!e.target.dataset.del) c.classList.toggle("turned"); }));
   $$("[data-del]").forEach((b) => (b.onclick = async () => {
     if (!confirm(`Remove ${b.dataset.del} and their photos?`)) return;
@@ -237,7 +257,7 @@ async function loadReport() {
     .map(([a, b]) => `<div class="stat"><span>${a}</span><b>${b}</b></div>`).join("");
   if (!held) { $("#repTable").innerHTML = `<p class="muted">Take attendance on a few days and the summary appears here.</p>`; return; }
   const days = r.dates.slice(-30);
-  $("#repTable").innerHTML = `<div class="rep-scroll"><table class="rep"><thead><tr><th>Student</th><th>Attendance</th><th>Last ${days.length} days</th><th></th></tr></thead><tbody>
+  $("#repTable").innerHTML = `<div class="rep-scroll"><table class="rep"><thead><tr><th>Student</th><th>Attendance</th><th>Last ${days.length} days <span class="strip-key"><i class="p"></i>present <i class="a"></i>absent <i></i>not on register</span></th><th></th></tr></thead><tbody>
     ${r.students.map((s) => `<tr class="${s.low ? "low" : ""}"><td><b>${esc(s.name)}</b><span class="r"> ${esc(s.roll)}</span></td>
       <td><div class="pct"><div class="pbar"><em style="width:${s.pct ?? 0}%"></em><i style="left:${r.min_pct}%"></i></div><span>${s.pct === null ? "–" : s.pct.toFixed(0) + "%"} · ${s.present}/${s.held}</span></div></td>
       <td><div class="days">${days.map((d) => `<i class="${({ Present: "p", Absent: "a" })[s.days[d]] || ""}" title="${esc(d)}: ${esc(s.days[d] || "not on register")}"></i>`).join("")}</div></td>

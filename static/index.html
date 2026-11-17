@@ -60,6 +60,10 @@
           <ul class="roster" id="roster"></ul>
           <p class="muted small" id="privNote">Names are hidden so a projected screen doesn't show who is absent. The full list is under Records.</p>
         </div>
+        <div class="card" id="newCard">
+          <h3>Enrolled today <span class="count" id="kNew">0</span></h3>
+          <ul class="newlist" id="newList"></ul>
+        </div>
         <div class="card" id="feedCard">
           <h3>Arrivals</h3>
           <ul class="feed" id="feed"></ul>
@@ -126,6 +130,7 @@
         <h3>3. Who is it? The distance race</h3>
         <p class="muted small">χ² distance from your face to every enrolled student (closest of their 60 templates) and to the closest of 192 strangers hidden in the gallery. Shorter bar = more alike.</p>
         <div id="race" class="race"></div>
+        <div class="race-key"><span><i class="mk"></i>0.50 distance limit</span><span><i class="sw st"></i>enrolled student</span><span><i class="sw cr"></i>crowd of strangers</span></div>
         <div id="raceVerdict" class="race-verdict"></div>
       </div>
     </div>
@@ -134,6 +139,7 @@
         <div class="seg" id="fpMode"><button data-m="hist" class="on">Texture histograms</button><button data-m="w">× learned weights</button></div></div>
       <p class="muted small" id="fpNote">Each square of your face (8×8 grid) holds 59 bars: how often each kind of texture code (spot, edge, corner, flat…) appears there. These 3,776 numbers (and the same again at radius 2) are what gets compared, not the photo. Drag to turn it.</p>
       <div class="fp3d" id="fp3d"><span class="fp-hint" id="fpHint">Waiting for a face…</span></div>
+      <div class="scale-key"><span>rare in this square</span><i></i><span>common</span><span class="muted">· bar height = share of the square's pixels with that texture code</span></div>
     </div>
   </section>
 
@@ -169,6 +175,7 @@
       <h2>Students</h2>
       <div><span class="muted small">Photos stay on this laptop. Click a card to see the photos it learned from.</span> <button id="btnTrain">Retrain</button></div>
     </div>
+    <div class="seg stu-filter" id="stuFilter"><button data-f="all" class="on">Everyone</button><button data-f="new">Enrolled today <span id="stuNewCount"></span></button></div>
     <div class="cards" id="studentCards"></div>
   </section>
 

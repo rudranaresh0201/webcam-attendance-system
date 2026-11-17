@@ -405,6 +405,32 @@ def explain():
     return Response(worker.explain, mimetype="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
+_enrolled = {"at": 0.0, "dates": {}}
+
+
+def enrolled_dates():
+    """roll -> (name, enrolment date). The status poll runs ~2.5 times a second, so the
+    folder scan is cached for 3 s instead of stat-ing every photo on every poll."""
+    if time.time() - _enrolled["at"] > 3:
+        dates = {}
+        for d in utils.student_dirs():
+            roll, name = utils.parse_student_dir(d.name)
+            dates[roll] = (name, utils.enrolled_on(d))
+        _enrolled.update(at=time.time(), dates=dates)
+    return _enrolled["dates"]
+
+
+def today():
+    return csv_path_for_today().stem.replace("attendance_", "")
+
+
+def new_today():
+    """Students whose enrolment photos were taken today (trained in yet or not)."""
+    t = today()
+    return sorted(({"roll": r, "name": n, "trained": any(s["roll"] == r for s in worker.labels.values())}
+                   for r, (n, d) in enrolled_dates().items() if d == t), key=lambda s: s["roll"])
+
+
 def roster():
     labels = worker.labels
     present = worker.session.present if worker.session else load_present(csv_path_for_today())
@@ -421,7 +447,7 @@ def status():
         reg = {k: w.reg[k] for k in ("roll", "name", "saved", "target", "hint")}
     return jsonify({
         "mode": w.mode, "fps": round(w.fps, 1), "view": w.view, "camera_ok": w.camera_ok, "camera_on": w.camera_on,
-        "faces": w.faces, "roster": roster(), "training": w.training, "message": w.message,
+        "faces": w.faces, "roster": roster(), "new_today": new_today(), "training": w.training, "message": w.message,
         "model_ok": w.model_ok, "students": len(w.labels), "register": reg,
         "events": (w.session.events[-12:][::-1] if w.session else []),
         "unknown_seen": len(w.session.unknown_tracks) if w.session else 0,
@@ -596,8 +622,11 @@ def students():
     out = []
     for d in utils.student_dirs():
         roll, name = utils.parse_student_dir(d.name)
+        enrolled = utils.enrolled_on(d)
         out.append({"roll": roll, "name": name, "images": len(utils.image_files(d)),
-                    "trained": any(s["roll"] == roll for s in worker.labels.values())})
+                    "trained": any(s["roll"] == roll for s in worker.labels.values()),
+                    "enrolled": enrolled, "new_today": enrolled == today()})
+    _enrolled["at"] = 0.0           # an enrolment or removal just happened: rescan on the next poll
     return jsonify(out)
 
 

@@ -104,7 +104,7 @@
     base.rotation.x = -Math.PI / 2; group.add(base);
     const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(slot * 0.6, 1, slot * 0.6), new THREE.MeshLambertMaterial(), G * G * B);
     group.add(mesh);
-    const m4 = new THREE.Matrix4(), col = new THREE.Color(), lo = new THREE.Color("#2a66c9"), hi = new THREE.Color("#c27c00");
+    const m4 = new THREE.Matrix4(), col = new THREE.Color(), lo = new THREE.Color("#5598e7"), hi = new THREE.Color("#0d366b");   // one hue, light = rare, dark = common
     const cur = new Float32Array(G * G * B), target = new Float32Array(G * G * B);
     let mode = "hist", rotY = -0.5, tilt = 0.95, drag = null, idle = 0, run = true;
     cam.position.set(0, 0, 13);
