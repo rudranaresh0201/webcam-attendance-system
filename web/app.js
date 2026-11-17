@@ -31,7 +31,10 @@ async function store(mode, fn) {
 const allStudents = () => store("readonly", (s) => s.getAll());
 let students = [];                       // [{id, roll, name, chips, thumb(dataURL)}]
 let settings = { ...DEFAULTS, ...ls.get("faceroll-settings", {}) };
-let records = ls.get("faceroll-records", {});        // {date: {roll: {name, time}}}
+let records = ls.get("faceroll-records", {});        // {date: {roll: {name, time}}}  only the present are stored
+// Everyone ever enrolled, with the day they joined. Kept even if a student is removed, so the
+// semester's history stays complete, and so nobody counts as absent before they enrolled.
+let roster = ls.get("faceroll-roster", {});          // {roll: {name, enrolled: "YYYY-MM-DD" | null (= before records began)}}
 
 // ------------------------------------------------------------------ worker
 const worker = new Worker("worker.js");
@@ -49,6 +52,9 @@ worker.postMessage({ type: "boot" });
 async function boot2() {
   $("#bootText").textContent = "Loading your students…"; $("#bootBar").style.width = "95%";
   students = await allStudents();
+  for (const s of students) if (!roster[s.roll]) roster[s.roll] = { name: s.name, enrolled: null };
+  ls.set("faceroll-roster", roster);
+  keepStorage();
   worker.postMessage({ type: "config", values: settings });
   worker.postMessage({ type: "load", students: students.map(({ id, roll, name, chips }) => ({ id, roll, name, chips })), present: presentToday() });
 }
@@ -226,7 +232,6 @@ function show(name) {
 }
 $$(".tabs a").forEach((a) => (a.onclick = () => show(a.dataset.tab)));
 $("#tab-live").classList.remove("on");
-show("live");
 
 // ------------------------------------------------------------------ live controls
 const VIEW_NOTES = {
@@ -273,6 +278,8 @@ async function finishEnrol(e, cancelled) {
   c.getContext("2d").putImageData(new ImageData(e.thumb, 96, 96), 0, 0);
   const rec = { id: e.id, roll: e.roll, name: e.name, chips: e.chips, thumb: c.toDataURL("image/jpeg", 0.85) };
   await store("readwrite", (s) => s.put(rec));
+  roster[e.roll] = { name: e.name, enrolled: roster[e.roll] ? roster[e.roll].enrolled : today() };   // re-enrolling keeps the first date
+  ls.set("faceroll-roster", roster);
   students = await allStudents();
   $("#ringProg").style.strokeDashoffset = 0;
   $("#regHint").textContent = `Done: ${e.name} is enrolled. Enrol the next person, or go to Live.`;
@@ -297,13 +304,103 @@ async function loadStudents() {
 }
 
 // ------------------------------------------------------------------ records
+// ------------------------------------------------------------------ semester memory
+async function keepStorage() {        // ask the browser not to clear this site's data when the disk fills up
+  try { keepStorage.ok = await navigator.storage?.persist?.(); } catch { keepStorage.ok = false; }
+}
+// was this student on the register that day? (enrolled by then, or marked present anyway)
+const onRegister = (roll, date) => !!records[date]?.[roll] || (!!roster[roll] && (!roster[roll].enrolled || roster[roll].enrolled <= date));
+function registerFor(date) {          // roll -> name for everyone on that day's register
+  const m = new Map();
+  for (const [r, v] of Object.entries(roster)) if (onRegister(r, date)) m.set(r, v.name);
+  for (const [r, v] of Object.entries(records[date] || {})) if (!m.has(r)) m.set(r, v.name);
+  return m;
+}
+const q = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
 function csvFor(date) {
-  const day = records[date] || {}, rows = new Map(students.map((s) => [s.roll, s.name]));
-  for (const [r, v] of Object.entries(day)) if (!rows.has(r)) rows.set(r, v.name);
-  const q = (v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-  return "roll,name,status,time\n" + [...rows].sort().map(([r, n]) => [r, n, day[r] ? "Present" : "Absent", day[r]?.time || ""].map(q).join(",")).join("\n") + "\n";
+  const day = records[date] || {};
+  return "roll,name,status,time\n" + [...registerFor(date)].sort().map(([r, n]) => [r, n, day[r] ? "Present" : "Absent", day[r]?.time || ""].map(q).join(",")).join("\n") + "\n";
+}
+function semester() {
+  const dates = Object.keys(records).sort(), rows = new Map();
+  for (const [r, v] of Object.entries(roster)) rows.set(r, { roll: r, name: v.name, days: {} });
+  for (const d of dates) for (const [r, v] of Object.entries(records[d])) if (!rows.has(r)) rows.set(r, { roll: r, name: v.name, days: {} });
+  for (const x of rows.values()) {
+    for (const d of dates) if (onRegister(x.roll, d)) x.days[d] = records[d][x.roll] ? "P" : "A";
+  }
+  return { dates, rows: [...rows.values()].sort((a, b) => a.roll.localeCompare(b.roll, undefined, { numeric: true })) };
+}
+function semesterCsv() {
+  const { dates, rows } = semester();
+  // one row per student, one column per day: P = present, A = absent, blank = not enrolled yet
+  return [["roll", "name", ...dates], ...rows.map((x) => [x.roll, x.name, ...dates.map((d) => x.days[d] || "")])]
+    .map((r) => r.map(q).join(",")).join("\n") + "\n";
+}
+function download(name, text, type) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function backupJson() {
+  return JSON.stringify({ app: "faceroll", kind: "attendance", version: 1, exported: new Date().toISOString(), roster, records });
+}
+// merge a backup into this browser: nothing already here is lost, the earlier time wins
+function restoreJson(text) {
+  let b;
+  try { b = JSON.parse(text); } catch { throw new Error("That file isn't a FaceRoll backup."); }
+  if (!b || b.app !== "faceroll" || b.kind !== "attendance" || typeof b.records !== "object") throw new Error("That file isn't a FaceRoll attendance backup.");
+  let marks = 0, days = 0;
+  for (const [d, day] of Object.entries(b.records)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !day || typeof day !== "object") continue;
+    if (!records[d]) days++;
+    const mine = (records[d] ||= {});
+    for (const [r, v] of Object.entries(day)) {
+      const t = String(v?.time ?? "");
+      if (!mine[r]) { mine[r] = { name: String(v?.name ?? r), time: t }; marks++; }
+      else if (t && t < mine[r].time) mine[r].time = t;
+    }
+  }
+  for (const [r, v] of Object.entries(b.roster || {})) {
+    const e = /^\d{4}-\d{2}-\d{2}$/.test(v?.enrolled) ? v.enrolled : null, m = roster[r];
+    if (!m) roster[r] = { name: String(v?.name ?? r), enrolled: e };
+    else if (m.enrolled && (!e || e < m.enrolled)) m.enrolled = e;
+  }
+  ls.set("faceroll-records", records); ls.set("faceroll-roster", roster);
+  return { marks, days };
+}
+$("#btnSemCsv").onclick = () => download(`attendance_semester_${today()}.csv`, semesterCsv(), "text/csv");
+$("#btnBackup").onclick = () => {
+  download(`faceroll_attendance_backup_${today()}.json`, backupJson(), "application/json");
+  ls.set("faceroll-lastbackup", today()); loadSemester();
+};
+$("#btnRestore").onclick = () => $("#fileRestore").click();
+$("#fileRestore").onchange = async (ev) => {
+  const f = ev.target.files[0]; ev.target.value = "";
+  if (!f) return;
+  try { const r = restoreJson(await f.text()); toast(`Restored: ${r.marks} attendance marks, ${r.days} new days.`); loadRecords(); }
+  catch (e) { toast(e.message); }
+};
+const fmtDate = (d) => new Date(d + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+function loadSemester() {
+  const { dates, rows } = semester();
+  const last = ls.get("faceroll-lastbackup", null);
+  const stale = dates.length >= 3 && (!last || (Date.now() - new Date(last + "T00:00")) / 864e5 > 7);
+  $("#semNote").innerHTML = dates.length
+    ? `Every day since <b>${fmtDate(dates[0])}</b> is kept in this browser on this laptop (${dates.length} day${dates.length > 1 ? "s" : ""}, ${rows.length} student${rows.length === 1 ? "" : "s"}).
+       ${keepStorage.ok ? "The browser has agreed not to clear it on its own." : ""}
+       <span class="${stale ? "warn" : ""}">Last backup: ${last ? fmtDate(last) : "never"}.</span>
+       Back up once a week; the backup file also moves the semester to another laptop (Restore backup there).`
+    : `Attendance from every day is kept here for the whole semester. Take attendance on the Live tab to start.`;
+  if (!dates.length) { $("#semTable").innerHTML = ""; return; }
+  const short = (d) => new Date(d + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  $("#semTable").innerHTML = `<div class="grid-scroll"><table class="grid"><thead><tr><th class="who">Student</th>
+    ${dates.map((d) => `<th title="${esc(d)}">${esc(short(d))}</th>`).join("")}</tr></thead><tbody>
+    ${rows.map((x) => `<tr><td class="who"><b>${esc(x.name)}</b> <span class="r">${esc(x.roll)}</span></td>
+      ${dates.map((d) => `<td class="${x.days[d] || "na"}" title="${esc(d)}: ${({ P: "present", A: "absent" })[x.days[d]] || "not enrolled yet"}">${x.days[d] || "·"}</td>`).join("")}</tr>`).join("")}
+    </tbody></table></div><p class="muted small key">P present · A absent · <span class="na">·</span> not enrolled yet</p>`;
 }
 function loadRecords() {
+  loadSemester();
   const dates = Object.keys(records).sort().reverse();
   $("#recordList").innerHTML = dates.length ? dates.map((d, i) => {
     const day = records[d], rows = csvFor(d).trim().split("\n").slice(1).map((l) => l.split(","));
@@ -314,10 +411,7 @@ function loadRecords() {
   }).join("") : `<div class="card empty">No attendance taken yet.</div>`;
   $$("[data-csv]").forEach((b) => (b.onclick = (ev) => {
     ev.preventDefault();
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csvFor(b.dataset.csv)], { type: "text/csv" }));
-    a.download = `attendance_${b.dataset.csv}.csv`; a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    download(`attendance_${b.dataset.csv}.csv`, csvFor(b.dataset.csv), "text/csv");
   }));
 }
 
@@ -336,7 +430,11 @@ $("#btnSave").onclick = () => {
 };
 $("#btnReset").onclick = () => { settings = { ...DEFAULTS }; applySettings(); loadSettings(); toast("Back to defaults."); };
 $("#btnWipe").onclick = async () => {
-  if (!confirm("Erase all students, photos and records stored by FaceRoll in this browser?")) return;
+  if (!confirm("Erase all students, photos and the whole semester's attendance stored by FaceRoll in this browser?\n\nTip: Records → Back up first, so you can restore the attendance later.")) return;
   for (const s of students) { await store("readwrite", (st) => st.delete(s.id)); worker.postMessage({ type: "remove", id: s.id }); }
-  students = []; records = {}; ls.set("faceroll-records", records); render.key = null; render(); toast("Everything erased.");
+  students = []; records = {}; roster = {}; ls.set("faceroll-records", records); ls.set("faceroll-roster", roster);
+  render.key = null; render(); toast("Everything erased.");
 };
+
+// open the tab named in the URL (#records etc.) once everything above is defined
+show(TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "live");

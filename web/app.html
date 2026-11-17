@@ -125,7 +125,14 @@
 
   <!-- RECORDS -->
   <section id="tab-records" class="face">
-    <div class="row-head"><h2>Records</h2><span class="muted small">One sheet per day, kept in this browser</span></div>
+    <div class="row-head"><h2>Records</h2><span class="muted small">One sheet per day, all kept in this browser for the whole semester</span></div>
+    <div class="card" id="semCard">
+      <div class="row-head sem-head"><h3>Semester</h3>
+        <div class="btns"><button id="btnSemCsv">Download semester CSV</button><button id="btnBackup">Back up</button><button id="btnRestore">Restore backup</button></div></div>
+      <input type="file" id="fileRestore" accept=".json,application/json" hidden>
+      <p class="sem-note" id="semNote"></p>
+      <div id="semTable"></div>
+    </div>
     <div id="recordList"></div>
   </section>
 

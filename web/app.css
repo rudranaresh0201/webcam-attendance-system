@@ -229,3 +229,19 @@ th { color: var(--ink-3); font-weight: 600; font-size: 13px; }
 @media (max-width: 760px) { .top, .tabs, .stage { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); } }
 
 [hidden] { display: none !important; }
+
+/* records: semester memory */
+.sem-head { margin-bottom: 6px; } .sem-head h3 { margin: 0; }
+.sem-head .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.sem-note { font-size: 14px; color: var(--ink-2); margin: 0 0 12px; max-width: 90ch; }
+.sem-note .warn { color: var(--amber); font-weight: 600; }
+.grid-scroll { overflow-x: auto; border: 1px solid var(--soft); border-radius: 8px; }
+table.grid { width: max-content; min-width: 100%; margin: 0; font-size: 13.5px; }
+table.grid th, table.grid td { text-align: center; padding: 6px 8px; white-space: nowrap; border-bottom: 1px solid var(--soft); }
+table.grid .who { text-align: left; position: sticky; left: 0; background: var(--card); z-index: 1; min-width: 180px; border-right: 1px solid var(--line); }
+table.grid .r { color: var(--ink-3); font-size: 12.5px; }
+table.grid td.P { color: var(--green); font-weight: 700; background: #eef6ef; }
+table.grid td.A { color: var(--red); font-weight: 700; }
+table.grid td.na, .key .na { color: var(--ink-3); }
+.key { margin: 8px 0 0; }
+
