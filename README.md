@@ -51,9 +51,10 @@ python app.py                        # web dashboard -> http://127.0.0.1:8000
 | channel | what it does |
 |---|---|
 | **Live** | A plain sentence says what the system sees and why ("closest is X, but not close enough: 0.58 vs 0.50"). **What the computer sees** switches the video to the pipeline's own images: contrast-fixed, LBP texture, and each detector's raw votes. **How it decided** shows the layers in 3D (face → texture codes → difference map → closest student) with meters against each limit. |
+| **Inside** (new) | The pipeline's own numbers for the face in view: the face at every step (camera → CLAHE → chip → LBP); the **Haar cascade replayed stage by stage** on a window OpenCV accepted (each rectangle test, its value, threshold and vote); the **χ² distance race** against every student and the hidden crowd; and the face's **LBP fingerprint in 3D** (64 squares × 59 texture bins), optionally scaled by the learned weights. |
 | **Enrol** | Name and roll number, then 30 guided webcam captures (blurred, dark or over-bright frames are refused), or import ≥ 10 photos. The model retrains automatically. |
 | **Students** | Enrolled students; click a card to flip it and see the captures. |
-| **Records** | One register per day, downloadable as CSV. |
+| **Records** | One register per day, downloadable as CSV, plus a **semester summary**: attendance % per student over all days, a day-by-day strip, and a flag below 75% (`MIN_ATTENDANCE_PCT`), downloadable as one CSV. |
 | **How well it works** | The benchmark results; click a chart to flip it for a plain explanation. |
 | **Settings** | Detector, lighting fix, LTP, limits, frames, blink check. *Tune for this class* measures the right limits on your own students. |
 
@@ -112,6 +113,7 @@ weights in `assets/`.
 | `lbp.py` | LBP, uniform mapping, LTP, spatial histograms, χ², weight learning |
 | `recognizer.py` | open-set LBP matcher and the OpenCV LBPH baseline |
 | `tracker.py` | IoU tracking, confirmation streak, blink state machine |
+| `inside.py` | the Inside tab: Haar cascade replay in NumPy, pipeline tiles, descriptor and distance race |
 | `attendance.py` | attendance session, CSV, CLI |
 | `register.py`, `train.py`, `evaluate.py` | CLI enrolment, training, calibration |
 | `benchmark.py` | all experiments and figures |

@@ -86,6 +86,9 @@ LIVENESS = False                 # also require a blink (Haar eye cascade) befor
 BLINK_MIN_OPEN = 2               # frames with eyes visible before / after the blink
 BLINK_MAX_CLOSED = 8             # a closed-eye run longer than this is not a blink
 
+# Records
+MIN_ATTENDANCE_PCT = 75         # below this a student is flagged in the semester report (common college rule)
+
 # Tracking
 TRACK_IOU = 0.3
 TRACK_MAX_MISSES = 10            # frames a face may go undetected before its track ends

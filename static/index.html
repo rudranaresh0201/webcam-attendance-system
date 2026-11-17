@@ -22,6 +22,7 @@
 
 <nav class="tabs">
   <a data-tab="live" class="on">Live</a>
+  <a data-tab="inside">Inside <span class="new">3D</span></a>
   <a data-tab="register">Enrol</a>
   <a data-tab="students">Students</a>
   <a data-tab="records">Records</a>
@@ -98,6 +99,44 @@
     </div>
   </section>
 
+  <!-- ============================================================ INSIDE -->
+  <section id="tab-inside" class="face">
+    <div class="row-head"><h2>Inside the pipeline</h2><span class="muted small" id="inStatus">Look at the camera…</span></div>
+    <div class="card">
+      <h3>1. Your face at every step</h3>
+      <div class="tiles" id="inTiles"></div>
+    </div>
+    <div class="two">
+      <div class="card">
+        <h3>2. The Haar cascade, running on your face</h3>
+        <p class="muted small">Viola–Jones: 25 stages and 2,913 rectangle tests on a 24×24 window. This re-runs OpenCV's own cascade file step by step in NumPy (it matches OpenCV's decisions on the same windows), so you can watch each test vote.</p>
+        <div class="haar">
+          <div class="haar-cv"><canvas id="haarCv" width="288" height="288"></canvas><span class="legend"><i class="w"></i>sum counted + <i class="b"></i>sum counted −</span></div>
+          <div class="haar-side">
+            <div class="stagebar" id="stageBar" aria-label="25 cascade stages"></div>
+            <p class="verdict-line" id="haarVerdict"></p>
+            <div class="seg" id="haarStageSeg"><button data-s="0" class="on">Stage 1</button><button data-s="1">Stage 2</button><button data-s="2">Stage 3</button></div>
+            <div class="haar-test" id="haarTest"></div>
+            <div class="haar-sum" id="haarSum"></div>
+            <button id="haarPlay" class="ghost">Pause</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>3. Who is it? The distance race</h3>
+        <p class="muted small">χ² distance from your face to every enrolled student (closest of their 60 templates) and to the closest of 192 strangers hidden in the gallery. Shorter bar = more alike.</p>
+        <div id="race" class="race"></div>
+        <div id="raceVerdict" class="race-verdict"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="how-head"><h3>4. Your face's fingerprint, in 3D</h3>
+        <div class="seg" id="fpMode"><button data-m="hist" class="on">Texture histograms</button><button data-m="w">× learned weights</button></div></div>
+      <p class="muted small" id="fpNote">Each square of your face (8×8 grid) holds 59 bars: how often each kind of texture code (spot, edge, corner, flat…) appears there. These 3,776 numbers (and the same again at radius 2) are what gets compared, not the photo. Drag to turn it.</p>
+      <div class="fp3d" id="fp3d"><span class="fp-hint" id="fpHint">Waiting for a face…</span></div>
+    </div>
+  </section>
+
   <!-- ============================================================ REGISTER -->
   <section id="tab-register" class="face">
     <div class="two">
@@ -136,6 +175,11 @@
   <!-- ============================================================ RECORDS -->
   <section id="tab-records" class="face">
     <div class="row-head"><h2>Records</h2><span class="muted small">One sheet per day</span></div>
+    <div class="card" id="reportCard">
+      <div class="how-head"><h3>Semester summary</h3><a href="/api/report.csv"><button>Download summary CSV</button></a></div>
+      <div class="stats rep-kpis" id="repKpis"></div>
+      <div id="repTable"></div>
+    </div>
     <div id="recordList"></div>
   </section>
 
@@ -175,6 +219,8 @@
     </div>
   </section>
 </main>
+<script src="/static/vendor/three.min.js"></script>
 <script src="/static/app.js"></script>
+<script src="/static/inside.js"></script>
 </body>
 </html>

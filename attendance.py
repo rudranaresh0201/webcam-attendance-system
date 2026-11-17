@@ -3,6 +3,7 @@
     python attendance.py          # OpenCV window, press q to finish
     python app.py                 # the same session inside the web dashboard
 """
+import os
 import sys
 import threading
 from datetime import datetime
@@ -57,7 +58,35 @@ def save_attendance(path, labels, present):
         for roll, name in sorted(students.items())
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows, columns=COLUMNS).to_csv(path, index=False)
+    # write a temporary file, then swap it in: a crash mid-write never leaves half a register
+    tmp = path.with_name(path.name + ".tmp")
+    pd.DataFrame(rows, columns=COLUMNS).to_csv(tmp, index=False)
+    os.replace(tmp, path)
+
+
+def attendance_report(records_dir=None, labels=None):
+    """Every daily register in records/ combined: per student, days present out of days
+    held, percentage, and whether they are below config.MIN_ATTENDANCE_PCT."""
+    records_dir = records_dir or config.RECORDS_DIR
+    files = sorted(records_dir.glob("attendance_*.csv")) if records_dir.exists() else []
+    dates, students = [], {}
+    for s in (labels or {}).values():
+        students[s["roll"]] = {"roll": s["roll"], "name": s["name"], "days": {}}
+    for f in files:
+        date = f.stem.replace("attendance_", "")
+        dates.append(date)
+        for row in pd.read_csv(f, dtype=str, keep_default_na=False).to_dict("records"):
+            st = students.setdefault(row["roll"], {"roll": row["roll"], "name": row["name"], "days": {}})
+            st["days"][date] = row["status"]
+    out = []
+    for st in students.values():
+        held = [d for d in dates if d in st["days"]]          # days this student was on the register
+        present = sum(st["days"][d] == "Present" for d in held)
+        pct = round(100 * present / len(held), 1) if held else None
+        out.append({**st, "present": present, "held": len(held), "pct": pct,
+                    "low": pct is not None and pct < config.MIN_ATTENDANCE_PCT})
+    out.sort(key=lambda r: (r["pct"] is None, r["pct"] if r["pct"] is not None else 0, r["roll"]))
+    return {"dates": dates, "students": out, "min_pct": config.MIN_ATTENDANCE_PCT}
 
 
 class AttendanceSession:
@@ -72,19 +101,32 @@ class AttendanceSession:
         self.tracker = Tracker()
         self.events = []            # (time, roll, name) for the UI feed
         self.unknown_tracks = set()
+        self.save_error = None      # set while the CSV can't be written (e.g. open in Excel)
         self._lock = threading.Lock()
+
+    def _save(self):
+        """Write the register; on failure keep everything in memory and retry next frame."""
+        try:
+            save_attendance(self.path, self.labels, self.present)
+            self.save_error = None
+        except OSError as e:
+            self.save_error = (f"Couldn't write {self.path.name} ({e.__class__.__name__}). "
+                               "If it's open in Excel, close it; nothing is lost, it will be saved automatically.")
 
     def mark_present(self, student):
         now = datetime.now().strftime("%H:%M:%S")
         with self._lock:
             self.present[student["roll"]] = {"name": student["name"], "time": now}
             self.events.append({"time": now, "roll": student["roll"], "name": student["name"]})
-            save_attendance(self.path, self.labels, self.present)
+            self._save()
         print(f"Present: {student['roll']} {student['name']} at {now}")
 
     def step(self, frame):
         """Detect, track, recognise. Returns a list of per-face result dicts."""
         results = []
+        if self.save_error:
+            with self._lock:
+                self._save()
         gray = self.engine.gray(frame)
         for track in self.tracker.update(self.engine.detect(frame)):
             chip = self.engine.describe(frame, track.face)
@@ -134,8 +176,10 @@ class AttendanceSession:
         return sum(1 for s in self.labels.values() if s["roll"] in self.present)
 
     def finish(self):
+        """Final save. Returns False (and keeps save_error) if the file couldn't be written."""
         with self._lock:
-            save_attendance(self.path, self.labels, self.present)
+            self._save()
+        return self.save_error is None
 
 
 def main():
@@ -156,7 +200,8 @@ def main():
         cap.release()
         cv2.destroyAllWindows()
 
-    session.finish()
+    if not session.finish():
+        print(session.save_error)
     print(f"\nPresent {session.count_present()}/{len(labels)}. Saved to {session.path}")
 
 

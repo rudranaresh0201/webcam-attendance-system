@@ -1,4 +1,4 @@
-"""Train the LBPH recognizer on everything in dataset/."""
+"""Build the recognizer (open-set LBP by default, or the OpenCV LBPH baseline) from everything in dataset/."""
 import sys
 
 import cv2

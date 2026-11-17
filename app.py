@@ -23,7 +23,8 @@ from flask import Flask, Response, abort, jsonify, request, send_file, send_from
 import config
 import lbp
 import utils
-from attendance import AttendanceSession, csv_path_for_today, load_present
+from attendance import AttendanceSession, attendance_report, csv_path_for_today, load_present
+from detector import Face
 from engines import FaceEngine
 from recognizer import CROWD, load_labels
 
@@ -159,6 +160,9 @@ class Worker:
         self.message = ""
         self.last_eval = None
         self.camera_on = True
+        self.view = "camera"
+        self.last = (None, None)        # latest frame and its biggest face, for the Inside tab
+        self.inside_jpg = None
         threading.Thread(target=self.loop, daemon=True).start()
 
     # ---------------------------------------------------------------- frame loop
@@ -241,6 +245,8 @@ class Worker:
                 "blinked": bool(r["track"].blinked) if r["track"] else False,
             })
         self.faces = faces
+        biggest = max(results, key=lambda r: r["box"][2] * r["box"][3], default=None)
+        self.last = (frame, Face(tuple(biggest["box"]), biggest["sources"]) if biggest else None)
         main = max((r for r in results if r["chip"] is not None), key=lambda r: r["box"][2] * r["box"][3],
                    default=None)
         if main is not None:
@@ -257,7 +263,7 @@ class Worker:
     def render_view(self, frame):
         """The picture the student sees: the camera, or one of the images the
         pipeline actually works on, so the processing is visible live."""
-        mode = getattr(self, "view", "camera")
+        mode = self.view
         if mode == "contrast":
             return cv2.cvtColor(self.engine.detection_image(frame), cv2.COLOR_GRAY2BGR)
         if mode == "texture":
@@ -362,10 +368,13 @@ class Worker:
     def stop_attendance(self):
         with self.lock:
             if self.session is not None:
-                self.session.finish()
                 p, n = self.session.count_present(), len(self.labels)
-                self.message = f"Session saved: {p}/{n} present -> {self.session.path.name}"
-                self.session = None
+                if self.session.finish():
+                    self.message = f"Session saved: {p}/{n} present -> {self.session.path.name}"
+                    self.session = None
+                else:                   # keep the session (and its marks) until the file can be written
+                    self.message = self.session.save_error
+                    return
             self.mode = "preview"
 
 
@@ -411,7 +420,7 @@ def status():
     if w.reg and w.mode == "register":
         reg = {k: w.reg[k] for k in ("roll", "name", "saved", "target", "hint")}
     return jsonify({
-        "mode": w.mode, "fps": round(w.fps, 1), "view": getattr(w, "view", "camera"), "camera_ok": w.camera_ok, "camera_on": w.camera_on,
+        "mode": w.mode, "fps": round(w.fps, 1), "view": w.view, "camera_ok": w.camera_ok, "camera_on": w.camera_on,
         "faces": w.faces, "roster": roster(), "training": w.training, "message": w.message,
         "model_ok": w.model_ok, "students": len(w.labels), "register": reg,
         "events": (w.session.events[-12:][::-1] if w.session else []),
@@ -419,7 +428,59 @@ def status():
         "recognizer": w.engine.recognizer.kind,
         "cohort": getattr(w.engine.recognizer, "has_cohort", False), "settings": current_settings(),
         "date": csv_path_for_today().stem.replace("attendance_", ""),
+        "save_error": w.session.save_error if w.session else None,
     })
+
+
+# ============================================================================ inside the pipeline
+@app.get("/api/inside")
+def inside_api():
+    """Everything the Inside tab shows, computed on demand for the biggest face in view:
+    the Haar cascade re-run stage by stage, the LBP descriptor, and the distance race."""
+    import inside
+    with worker.lock:
+        frame, face = worker.last
+        if frame is None or face is None:
+            return jsonify(face=False)
+        eng = worker.engine
+        tiles, chip = inside.stage_tiles(eng, frame, face)
+        window, votes = inside.haar_window(eng.detection_image(frame), face.box, eng.detector.haar)
+        haar = {**inside.haar_trace(window), "votes": votes}
+        fp = inside.fingerprint(eng.recognizer, chip, worker.labels)
+        weights = getattr(eng.recognizer, "weights", None)
+    worker.inside_jpg = cv2.imencode(".jpg", tiles, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes()
+    out = {"face": True, "box": list(face.box), "sources": face.sources, "haar": haar, "window": window.tolist(),
+           "stage_names": inside.STAGE_NAMES, "thresholds": {"dist": config.DIST_THRESHOLD, "ratio": config.RATIO_THRESHOLD}, **fp}
+    if request.args.get("weights") and weights is not None:
+        out["weights"] = np.round(weights, 3).tolist()
+    return jsonify(out)
+
+
+@app.route("/inside.jpg")
+def inside_jpg():
+    data = worker.inside_jpg or cv2.imencode(".jpg", placeholder("No face"))[1].tobytes()
+    return Response(data, mimetype="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/report")
+def report():
+    return jsonify(attendance_report(labels=worker.labels))
+
+
+@app.get("/api/report.csv")
+def report_csv():
+    """Semester summary: one row per student, percentage, flag, and P/A for every day."""
+    import csv
+    import io
+    r = attendance_report(labels=worker.labels)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["roll", "name", "present", "days", "percent", f"below_{r['min_pct']}"] + r["dates"])
+    for s in r["students"]:
+        w.writerow([s["roll"], s["name"], s["present"], s["held"], "" if s["pct"] is None else s["pct"],
+                    "yes" if s["low"] else "no"] + [{"Present": "P", "Absent": "A"}.get(s["days"].get(d), "") for d in r["dates"]])
+    return Response(buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=attendance_report.csv"})
 
 
 @app.post("/api/attendance/start")
@@ -439,12 +500,12 @@ def set_view():
     v = (request.json or {}).get("view", "camera")
     if v in Worker.VIEWS:
         worker.view = v
-    return jsonify(view=getattr(worker, "view", "camera"))
+    return jsonify(view=worker.view)
 
 
 @app.post("/api/camera")
 def camera_toggle():
-    worker.camera_on = bool(request.json.get("on", True))
+    worker.camera_on = bool((request.json or {}).get("on", True))
     return jsonify(ok=True)
 
 

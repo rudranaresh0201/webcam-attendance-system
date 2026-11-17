@@ -2,7 +2,7 @@
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const TABS = ["live", "register", "students", "records", "insights", "settings"];
+const TABS = ["live", "inside", "register", "students", "records", "insights", "settings"];
 let state = null, lastMsg = "", tab = null;
 
 async function api(path, opts = {}) {
@@ -33,7 +33,7 @@ function show(name) {
   next.addEventListener("animationend", () => next.classList.remove("in-r", "in-l"), { once: true });
   $("#video").src = name === "live" ? "/stream.mjpg" : "";        // one camera stream at a time
   $("#regVideo").src = name === "register" ? "/stream.mjpg" : "";
-  ({ students: loadStudents, records: loadRecords, insights: loadBench, settings: loadSettings })[name]?.();
+  ({ students: loadStudents, records: loadRecords, insights: loadBench, settings: loadSettings, inside: () => window.startInside?.() })[name]?.();
   try { localStorage.setItem("tab", name); } catch {}
 }
 $$(".tabs a").forEach((a) => (a.onclick = () => show(a.dataset.tab)));
@@ -165,6 +165,8 @@ function render(s) {
   }
   render.wasReg = active;
   if (s.message && s.message !== lastMsg) { lastMsg = s.message; toast(s.message); }
+  if (s.save_error && s.save_error !== render.se) toast(s.save_error);
+  render.se = s.save_error;
 }
 
 function showNames() { try { return localStorage.getItem("showNames") === "1"; } catch { return false; } }
@@ -226,7 +228,25 @@ async function loadStudents() {
 $("#btnTrain").onclick = () => api("/api/train", { json: {} }).then(() => toast("Learning faces…"));
 
 // ------------------------------------------------------------------ records
+async function loadReport() {
+  const r = await api("/api/report");
+  const held = r.dates.length, ss = r.students.filter((s) => s.pct !== null);
+  const avg = ss.length ? ss.reduce((a, s) => a + s.pct, 0) / ss.length : null, low = ss.filter((s) => s.low).length;
+  $("#repKpis").innerHTML = [["Days recorded", held], ["Average attendance", avg === null ? "–" : avg.toFixed(0) + "%"],
+    [`Below ${r.min_pct}%`, low], ["Students", r.students.length]]
+    .map(([a, b]) => `<div class="stat"><span>${a}</span><b>${b}</b></div>`).join("");
+  if (!held) { $("#repTable").innerHTML = `<p class="muted">Take attendance on a few days and the summary appears here.</p>`; return; }
+  const days = r.dates.slice(-30);
+  $("#repTable").innerHTML = `<div class="rep-scroll"><table class="rep"><thead><tr><th>Student</th><th>Attendance</th><th>Last ${days.length} days</th><th></th></tr></thead><tbody>
+    ${r.students.map((s) => `<tr class="${s.low ? "low" : ""}"><td><b>${esc(s.name)}</b><span class="r"> ${esc(s.roll)}</span></td>
+      <td><div class="pct"><div class="pbar"><em style="width:${s.pct ?? 0}%"></em><i style="left:${r.min_pct}%"></i></div><span>${s.pct === null ? "–" : s.pct.toFixed(0) + "%"} · ${s.present}/${s.held}</span></div></td>
+      <td><div class="days">${days.map((d) => `<i class="${({ Present: "p", Absent: "a" })[s.days[d]] || ""}" title="${esc(d)}: ${esc(s.days[d] || "not on register")}"></i>`).join("")}</div></td>
+      <td>${s.low ? `<span class="tag lowtag">below ${r.min_pct}%</span>` : ""}</td></tr>`).join("")}
+    </tbody></table></div>`;
+}
+
 async function loadRecords() {
+  loadReport().catch(() => {});
   const recs = await api("/api/records");
   $("#recordList").innerHTML = recs.length ? recs.map((r, i) => `
     <details class="card reg" ${i === 0 ? "open" : ""}><summary><b>${esc(r.date)}</b>
@@ -320,7 +340,7 @@ $("#btnCalApply").onclick = async () => {
 $("#camOn").onchange = (e) => api("/api/camera", { json: { on: e.target.checked } });
 
 let first = "live";
-try { first = localStorage.getItem("tab") || "live"; } catch {}
+try { first = location.hash.slice(1) || localStorage.getItem("tab") || "live"; } catch {}
 $("#tab-live").classList.remove("on");
 show(TABS.includes(first) ? first : "live");
 poll();
