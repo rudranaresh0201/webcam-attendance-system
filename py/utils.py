@@ -1,5 +1,6 @@
 """Shared helpers: camera, frame preparation, dataset layout, face quality, drawing."""
 import sys
+from datetime import datetime
 
 import cv2
 
@@ -91,6 +92,13 @@ def parse_student_dir(dirname):
 
 def image_files(directory):
     return sorted(p for p in directory.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES)
+
+
+def enrolled_on(directory):
+    """Enrolment date (YYYY-MM-DD): when the student's first photo was saved.
+    Re-enrolling rewrites the photos, so it resets this date."""
+    times = [p.stat().st_mtime for p in image_files(directory)]
+    return datetime.fromtimestamp(min(times)).date().isoformat() if times else None
 
 
 def draw_label(frame, box, text, color):
